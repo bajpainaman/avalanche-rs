@@ -14,8 +14,6 @@ import (
 	"time"
 
 	"github.com/ava-labs/avalanche-rs/avalanchego-conformance/rpcpb"
-	"github.com/ava-labs/avalanchego/cache"
-	"github.com/ava-labs/avalanchego/ids"
 	"github.com/ava-labs/avalanchego/utils/crypto/secp256k1"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -44,12 +42,14 @@ type server struct {
 
 	mu *sync.RWMutex
 
-	secpFactory *secp256k1.Factory
+	// secp256k1 key recovery cache for improved performance
+	recoverCache *secp256k1.RecoverCache
 
 	rpcpb.UnimplementedPingServiceServer
 	rpcpb.UnimplementedKeyServiceServer
 	rpcpb.UnimplementedPackerServiceServer
 	rpcpb.UnimplementedMessageServiceServer
+	rpcpb.UnimplementedL1TxServiceServer
 }
 
 var (
@@ -74,11 +74,7 @@ func New(cfg Config) (Server, error) {
 		ln:         ln,
 		gRPCServer: grpc.NewServer(),
 
-		secpFactory: &secp256k1.Factory{
-			Cache: cache.LRU[ids.ID, *secp256k1.PublicKey]{
-				Size: 256,
-			},
-		},
+		recoverCache: secp256k1.NewRecoverCache(256),
 
 		mu: new(sync.RWMutex),
 	}, nil
@@ -91,6 +87,7 @@ func (s *server) Run(rootCtx context.Context) (err error) {
 		rpcpb.RegisterKeyServiceServer(s.gRPCServer, s)
 		rpcpb.RegisterPackerServiceServer(s.gRPCServer, s)
 		rpcpb.RegisterMessageServiceServer(s.gRPCServer, s)
+		rpcpb.RegisterL1TxServiceServer(s.gRPCServer, s)
 	})
 
 	gRPCErrc := make(chan error)

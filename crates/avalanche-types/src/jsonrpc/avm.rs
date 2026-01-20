@@ -113,7 +113,15 @@ fn test_issue_tx() {
 }
 
 /// ref. <https://docs.avax.network/apis/avalanchego/apis/x-chain/#avmgettxstatus>
+///
+/// **DEPRECATED since avalanchego v1.14.0 (Granite)**: Use `avm.getTx` instead.
+/// This API will be removed in a future version.
+#[deprecated(
+    since = "0.2.0",
+    note = "Use avm.getTx instead. Deprecated in avalanchego v1.14.0"
+)]
 #[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone)]
+#[allow(deprecated)]
 pub struct GetTxStatusResponse {
     pub jsonrpc: String,
     pub id: u32,
@@ -125,6 +133,7 @@ pub struct GetTxStatusResponse {
     pub error: Option<jsonrpc::ResponseError>,
 }
 
+#[allow(deprecated)]
 impl Default for GetTxStatusResponse {
     fn default() -> Self {
         Self {
@@ -137,6 +146,12 @@ impl Default for GetTxStatusResponse {
 }
 
 /// ref. <https://docs.avax.network/apis/avalanchego/apis/x-chain/#avmgettxstatus>
+///
+/// **DEPRECATED since avalanchego v1.14.0 (Granite)**: Use `avm.getTx` instead.
+#[deprecated(
+    since = "0.2.0",
+    note = "Use avm.getTx instead. Deprecated in avalanchego v1.14.0"
+)]
 #[serde_as]
 #[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone)]
 pub struct GetTxStatusResult {
@@ -144,6 +159,7 @@ pub struct GetTxStatusResult {
     pub status: choices::status::Status,
 }
 
+#[allow(deprecated)]
 impl Default for GetTxStatusResult {
     fn default() -> Self {
         Self {
@@ -154,6 +170,7 @@ impl Default for GetTxStatusResult {
 
 /// RUST_LOG=debug cargo test --package avalanche-types --lib -- jsonrpc::avm::test_get_tx_status --exact --show-output
 #[test]
+#[allow(deprecated)]
 fn test_get_tx_status() {
     // ref. https://docs.avax.network/apis/avalanchego/apis/x-chain/#avmgettxstatus
     let resp: GetTxStatusResponse = serde_json::from_str(

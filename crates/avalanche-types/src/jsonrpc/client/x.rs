@@ -82,6 +82,14 @@ pub async fn issue_tx(http_rpc: &str, tx: &str) -> Result<avm::IssueTxResponse> 
 
 /// e.g., "avm.getTxStatus" on "http://\[ADDR\]:9650" and "/ext/bc/X" path.
 /// ref. <https://docs.avax.network/apis/avalanchego/apis/x-chain/#avmgettxstatus>
+///
+/// **DEPRECATED since avalanchego v1.14.0 (Granite)**: Use `avm.getTx` instead.
+/// This API will be removed in a future version.
+#[deprecated(
+    since = "0.2.0",
+    note = "Use avm.getTx instead. Deprecated in avalanchego v1.14.0"
+)]
+#[allow(deprecated)]
 pub async fn get_tx_status(http_rpc: &str, tx_id: &str) -> Result<avm::GetTxStatusResponse> {
     let (scheme, host, port, _, _) =
         utils::urls::extract_scheme_host_port_path_chain_alias(http_rpc).map_err(|e| {

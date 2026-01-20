@@ -10,23 +10,99 @@ pub mod rpcpb {
     tonic::include_proto!("rpcpb");
 }
 pub use rpcpb::{
-    key_service_client::KeyServiceClient, message_service_client::MessageServiceClient,
-    packer_service_client::PackerServiceClient, ping_service_client::PingServiceClient,
-    AcceptedFrontierRequest, AcceptedFrontierResponse, AcceptedRequest, AcceptedResponse,
-    AcceptedStateSummaryRequest, AcceptedStateSummaryResponse, AncestorsRequest, AncestorsResponse,
-    AppGossipRequest, AppGossipResponse, AppRequestRequest, AppRequestResponse, AppResponseRequest,
-    AppResponseResponse, BlsSignatureRequest, BlsSignatureResponse, BuildVertexRequest,
-    BuildVertexResponse, CertificateToNodeIdRequest, CertificateToNodeIdResponse, ChainAddresses,
-    ChitsRequest, ChitsResponse, GetAcceptedFrontierRequest, GetAcceptedFrontierResponse,
-    GetAcceptedRequest, GetAcceptedResponse, GetAcceptedStateSummaryRequest,
-    GetAcceptedStateSummaryResponse, GetAncestorsRequest, GetAncestorsResponse, GetRequest,
-    GetResponse, GetStateSummaryFrontierRequest, GetStateSummaryFrontierResponse, Peer,
-    PeerlistRequest, PeerlistResponse, PingRequest, PingResponse, PingServiceRequest,
-    PingServiceResponse, PongRequest, PongResponse, PullQueryRequest, PullQueryResponse,
-    PushQueryRequest, PushQueryResponse, PutRequest, PutResponse, Secp256k1Info,
-    Secp256k1InfoRequest, Secp256k1InfoResponse, Secp256k1RecoverHashPublicKeyRequest,
-    Secp256k1RecoverHashPublicKeyResponse, StateSummaryFrontierRequest,
-    StateSummaryFrontierResponse, VersionRequest, VersionResponse,
+    key_service_client::KeyServiceClient,
+    l1_tx_service_client::L1TxServiceClient,
+    message_service_client::MessageServiceClient,
+    packer_service_client::PackerServiceClient,
+    ping_service_client::PingServiceClient,
+    AcceptedFrontierRequest,
+    AcceptedFrontierResponse,
+    AcceptedRequest,
+    AcceptedResponse,
+    AcceptedStateSummaryRequest,
+    AcceptedStateSummaryResponse,
+    AncestorsRequest,
+    AncestorsResponse,
+    AppGossipRequest,
+    AppGossipResponse,
+    AppRequestRequest,
+    AppRequestResponse,
+    AppResponseRequest,
+    AppResponseResponse,
+    BlsSignatureRequest,
+    BlsSignatureResponse,
+    BuildVertexRequest,
+    BuildVertexResponse,
+    CertificateToNodeIdRequest,
+    CertificateToNodeIdResponse,
+    ChainAddresses,
+    ChitsRequest,
+    ChitsResponse,
+    // L1 Transaction types
+    ConvertSubnetToL1TxRequest,
+    ConvertSubnetToL1TxResponse,
+    DisableL1ValidatorTxRequest,
+    DisableL1ValidatorTxResponse,
+    // Existing types
+    GetAcceptedFrontierRequest,
+    GetAcceptedFrontierResponse,
+    GetAcceptedRequest,
+    GetAcceptedResponse,
+    GetAcceptedStateSummaryRequest,
+    GetAcceptedStateSummaryResponse,
+    GetAncestorsRequest,
+    GetAncestorsResponse,
+    GetRequest,
+    GetResponse,
+    GetStateSummaryFrontierRequest,
+    GetStateSummaryFrontierResponse,
+    IncreaseL1ValidatorBalanceTxRequest,
+    IncreaseL1ValidatorBalanceTxResponse,
+    InitialL1Validator,
+    InputPayload,
+    L1ValidatorWeightPayloadRequest,
+    L1ValidatorWeightPayloadResponse,
+    OutputPayload,
+    PChainOwner,
+    Peer,
+    PeerlistRequest,
+    PeerlistResponse,
+    PingRequest,
+    PingResponse,
+    PingServiceRequest,
+    PingServiceResponse,
+    PongRequest,
+    PongResponse,
+    PullQueryRequest,
+    PullQueryResponse,
+    PushQueryRequest,
+    PushQueryResponse,
+    PutRequest,
+    PutResponse,
+    RegisterL1ValidatorPayloadRequest,
+    RegisterL1ValidatorPayloadResponse,
+    RegisterL1ValidatorTxRequest,
+    RegisterL1ValidatorTxResponse,
+    Secp256k1Info,
+    Secp256k1InfoRequest,
+    Secp256k1InfoResponse,
+    Secp256k1RecoverHashPublicKeyRequest,
+    Secp256k1RecoverHashPublicKeyResponse,
+    SetL1ValidatorWeightTxRequest,
+    SetL1ValidatorWeightTxResponse,
+    StateSummaryFrontierRequest,
+    StateSummaryFrontierResponse,
+    SubnetToL1ConversionPayloadRequest,
+    SubnetToL1ConversionPayloadResponse,
+    TransferableInput,
+    TransferableOutput,
+    VersionRequest,
+    VersionResponse,
+    WarpMessageBytes,
+    WarpMessageRequest,
+    WarpMessageResponse,
+    WarpUnsignedMessageRequest,
+    WarpUnsignedMessageResponse,
 };
 
 pub struct Client<T> {
@@ -40,6 +116,7 @@ pub struct GrpcClient<T> {
     pub key_service_client: Mutex<KeyServiceClient<T>>,
     pub packer_service_client: Mutex<PackerServiceClient<T>>,
     pub message_service_client: Mutex<MessageServiceClient<T>>,
+    pub l1_tx_service_client: Mutex<L1TxServiceClient<T>>,
 }
 
 impl Client<Channel> {
@@ -55,11 +132,13 @@ impl Client<Channel> {
         let key_client = KeyServiceClient::connect(ep.clone()).await.unwrap();
         let packer_client = PackerServiceClient::connect(ep.clone()).await.unwrap();
         let message_client = MessageServiceClient::connect(ep.clone()).await.unwrap();
+        let l1_tx_client = L1TxServiceClient::connect(ep.clone()).await.unwrap();
         let grpc_client = GrpcClient {
             ping_service_client: Mutex::new(ping_client),
             key_service_client: Mutex::new(key_client),
             packer_service_client: Mutex::new(packer_client),
             message_service_client: Mutex::new(message_client),
+            l1_tx_service_client: Mutex::new(l1_tx_client),
         };
         Self {
             rpc_endpoint: String::from(rpc_endpoint),
@@ -397,6 +476,169 @@ impl Client<Channel> {
             .version(req)
             .await
             .map_err(|e| Error::new(ErrorKind::Other, format!("failed version '{}'", e)))?;
+        Ok(resp.into_inner())
+    }
+
+    // =========================================================================
+    // L1 Transaction Service Methods (Granite upgrade)
+    // =========================================================================
+
+    pub async fn convert_subnet_to_l1_tx(
+        &self,
+        req: ConvertSubnetToL1TxRequest,
+    ) -> io::Result<ConvertSubnetToL1TxResponse> {
+        let mut cli = self.grpc_client.l1_tx_service_client.lock().await;
+        let req = tonic::Request::new(req);
+        let resp = cli.convert_subnet_to_l1_tx(req).await.map_err(|e| {
+            Error::new(
+                ErrorKind::Other,
+                format!("failed convert_subnet_to_l1_tx '{}'", e),
+            )
+        })?;
+        Ok(resp.into_inner())
+    }
+
+    pub async fn register_l1_validator_tx(
+        &self,
+        req: RegisterL1ValidatorTxRequest,
+    ) -> io::Result<RegisterL1ValidatorTxResponse> {
+        let mut cli = self.grpc_client.l1_tx_service_client.lock().await;
+        let req = tonic::Request::new(req);
+        let resp = cli.register_l1_validator_tx(req).await.map_err(|e| {
+            Error::new(
+                ErrorKind::Other,
+                format!("failed register_l1_validator_tx '{}'", e),
+            )
+        })?;
+        Ok(resp.into_inner())
+    }
+
+    pub async fn set_l1_validator_weight_tx(
+        &self,
+        req: SetL1ValidatorWeightTxRequest,
+    ) -> io::Result<SetL1ValidatorWeightTxResponse> {
+        let mut cli = self.grpc_client.l1_tx_service_client.lock().await;
+        let req = tonic::Request::new(req);
+        let resp = cli.set_l1_validator_weight_tx(req).await.map_err(|e| {
+            Error::new(
+                ErrorKind::Other,
+                format!("failed set_l1_validator_weight_tx '{}'", e),
+            )
+        })?;
+        Ok(resp.into_inner())
+    }
+
+    pub async fn increase_l1_validator_balance_tx(
+        &self,
+        req: IncreaseL1ValidatorBalanceTxRequest,
+    ) -> io::Result<IncreaseL1ValidatorBalanceTxResponse> {
+        let mut cli = self.grpc_client.l1_tx_service_client.lock().await;
+        let req = tonic::Request::new(req);
+        let resp = cli
+            .increase_l1_validator_balance_tx(req)
+            .await
+            .map_err(|e| {
+                Error::new(
+                    ErrorKind::Other,
+                    format!("failed increase_l1_validator_balance_tx '{}'", e),
+                )
+            })?;
+        Ok(resp.into_inner())
+    }
+
+    pub async fn disable_l1_validator_tx(
+        &self,
+        req: DisableL1ValidatorTxRequest,
+    ) -> io::Result<DisableL1ValidatorTxResponse> {
+        let mut cli = self.grpc_client.l1_tx_service_client.lock().await;
+        let req = tonic::Request::new(req);
+        let resp = cli.disable_l1_validator_tx(req).await.map_err(|e| {
+            Error::new(
+                ErrorKind::Other,
+                format!("failed disable_l1_validator_tx '{}'", e),
+            )
+        })?;
+        Ok(resp.into_inner())
+    }
+
+    // =========================================================================
+    // Warp Message Service Methods
+    // =========================================================================
+
+    pub async fn warp_unsigned_message(
+        &self,
+        req: WarpUnsignedMessageRequest,
+    ) -> io::Result<WarpUnsignedMessageResponse> {
+        let mut cli = self.grpc_client.l1_tx_service_client.lock().await;
+        let req = tonic::Request::new(req);
+        let resp = cli.warp_unsigned_message(req).await.map_err(|e| {
+            Error::new(
+                ErrorKind::Other,
+                format!("failed warp_unsigned_message '{}'", e),
+            )
+        })?;
+        Ok(resp.into_inner())
+    }
+
+    pub async fn warp_message(&self, req: WarpMessageRequest) -> io::Result<WarpMessageResponse> {
+        let mut cli = self.grpc_client.l1_tx_service_client.lock().await;
+        let req = tonic::Request::new(req);
+        let resp = cli
+            .warp_message(req)
+            .await
+            .map_err(|e| Error::new(ErrorKind::Other, format!("failed warp_message '{}'", e)))?;
+        Ok(resp.into_inner())
+    }
+
+    // =========================================================================
+    // Warp Payload Service Methods
+    // =========================================================================
+
+    pub async fn register_l1_validator_payload(
+        &self,
+        req: RegisterL1ValidatorPayloadRequest,
+    ) -> io::Result<RegisterL1ValidatorPayloadResponse> {
+        let mut cli = self.grpc_client.l1_tx_service_client.lock().await;
+        let req = tonic::Request::new(req);
+        let resp = cli.register_l1_validator_payload(req).await.map_err(|e| {
+            Error::new(
+                ErrorKind::Other,
+                format!("failed register_l1_validator_payload '{}'", e),
+            )
+        })?;
+        Ok(resp.into_inner())
+    }
+
+    pub async fn l1_validator_weight_payload(
+        &self,
+        req: L1ValidatorWeightPayloadRequest,
+    ) -> io::Result<L1ValidatorWeightPayloadResponse> {
+        let mut cli = self.grpc_client.l1_tx_service_client.lock().await;
+        let req = tonic::Request::new(req);
+        let resp = cli.l1_validator_weight_payload(req).await.map_err(|e| {
+            Error::new(
+                ErrorKind::Other,
+                format!("failed l1_validator_weight_payload '{}'", e),
+            )
+        })?;
+        Ok(resp.into_inner())
+    }
+
+    pub async fn subnet_to_l1_conversion_payload(
+        &self,
+        req: SubnetToL1ConversionPayloadRequest,
+    ) -> io::Result<SubnetToL1ConversionPayloadResponse> {
+        let mut cli = self.grpc_client.l1_tx_service_client.lock().await;
+        let req = tonic::Request::new(req);
+        let resp = cli
+            .subnet_to_l1_conversion_payload(req)
+            .await
+            .map_err(|e| {
+                Error::new(
+                    ErrorKind::Other,
+                    format!("failed subnet_to_l1_conversion_payload '{}'", e),
+                )
+            })?;
         Ok(resp.into_inner())
     }
 }

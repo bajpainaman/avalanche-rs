@@ -1,0 +1,305 @@
+syntax = "proto3";
+
+option go_package = "github.com/ava-labs/avalanche-rs/avalanchego-conformance;rpcpb";
+
+package rpcpb;
+
+// L1TxService provides conformance testing for Granite upgrade transaction types.
+// These transactions were introduced in Etna (ACP-77) for L1 validator management.
+service L1TxService {
+  // Transaction serialization conformance
+  rpc ConvertSubnetToL1Tx(ConvertSubnetToL1TxRequest) returns (ConvertSubnetToL1TxResponse);
+  rpc RegisterL1ValidatorTx(RegisterL1ValidatorTxRequest) returns (RegisterL1ValidatorTxResponse);
+  rpc SetL1ValidatorWeightTx(SetL1ValidatorWeightTxRequest) returns (SetL1ValidatorWeightTxResponse);
+  rpc IncreaseL1ValidatorBalanceTx(IncreaseL1ValidatorBalanceTxRequest) returns (IncreaseL1ValidatorBalanceTxResponse);
+  rpc DisableL1ValidatorTx(DisableL1ValidatorTxRequest) returns (DisableL1ValidatorTxResponse);
+
+  // Warp message serialization
+  rpc WarpUnsignedMessage(WarpUnsignedMessageRequest) returns (WarpUnsignedMessageResponse);
+  rpc WarpMessage(WarpMessageRequest) returns (WarpMessageResponse);
+
+  // Warp payload serialization (RegisterL1ValidatorMessage, L1ValidatorWeightMessage)
+  rpc RegisterL1ValidatorPayload(RegisterL1ValidatorPayloadRequest) returns (RegisterL1ValidatorPayloadResponse);
+  rpc L1ValidatorWeightPayload(L1ValidatorWeightPayloadRequest) returns (L1ValidatorWeightPayloadResponse);
+  rpc SubnetToL1ConversionPayload(SubnetToL1ConversionPayloadRequest) returns (SubnetToL1ConversionPayloadResponse);
+}
+
+// ============================================================================
+// Response Types
+// ============================================================================
+
+message ConvertSubnetToL1TxResponse {
+  bytes expected_bytes = 1;
+  bytes computed_id = 2;
+  string message = 3;
+  bool success = 4;
+}
+
+message RegisterL1ValidatorTxResponse {
+  bytes expected_bytes = 1;
+  bytes computed_id = 2;
+  string message = 3;
+  bool success = 4;
+}
+
+message SetL1ValidatorWeightTxResponse {
+  bytes expected_bytes = 1;
+  bytes computed_id = 2;
+  string message = 3;
+  bool success = 4;
+}
+
+message IncreaseL1ValidatorBalanceTxResponse {
+  bytes expected_bytes = 1;
+  bytes computed_id = 2;
+  string message = 3;
+  bool success = 4;
+}
+
+message DisableL1ValidatorTxResponse {
+  bytes expected_bytes = 1;
+  bytes computed_id = 2;
+  string message = 3;
+  bool success = 4;
+}
+
+message WarpUnsignedMessageResponse {
+  bytes expected_bytes = 1;
+  bytes computed_id = 2;
+  string message = 3;
+  bool success = 4;
+}
+
+message WarpMessageResponse {
+  bytes expected_bytes = 1;
+  bytes computed_id = 2;
+  string message = 3;
+  bool success = 4;
+}
+
+message RegisterL1ValidatorPayloadResponse {
+  bytes expected_bytes = 1;
+  bytes computed_id = 2;
+  string message = 3;
+  bool success = 4;
+}
+
+message L1ValidatorWeightPayloadResponse {
+  bytes expected_bytes = 1;
+  bytes computed_id = 2;
+  string message = 3;
+  bool success = 4;
+}
+
+message SubnetToL1ConversionPayloadResponse {
+  bytes expected_bytes = 1;
+  bytes computed_id = 2;
+  string message = 3;
+  bool success = 4;
+}
+
+// ============================================================================
+// L1 Transaction Types
+// ============================================================================
+
+// ConvertSubnetToL1Tx converts a permissioned Subnet to an L1 (Type ID: 32)
+message ConvertSubnetToL1TxRequest {
+  // Base transaction fields
+  uint32 network_id = 1;
+  bytes blockchain_id = 2;
+  repeated TransferableOutput outputs = 3;
+  repeated TransferableInput inputs = 4;
+  bytes memo = 5;
+
+  // ConvertSubnetToL1Tx specific fields
+  bytes subnet_id = 6;
+  bytes chain_id = 7;
+  bytes address = 8;  // Subnet manager address
+  repeated InitialL1Validator validators = 9;
+  bytes subnet_auth = 10;  // Subnet authorization credentials
+
+  // Rust-serialized bytes for comparison
+  bytes serialized_tx = 11;
+}
+
+// RegisterL1ValidatorTx registers a new L1 validator via Warp message (Type ID: 33)
+message RegisterL1ValidatorTxRequest {
+  // Base transaction fields
+  uint32 network_id = 1;
+  bytes blockchain_id = 2;
+  repeated TransferableOutput outputs = 3;
+  repeated TransferableInput inputs = 4;
+  bytes memo = 5;
+
+  // RegisterL1ValidatorTx specific fields
+  uint64 balance = 6;
+  bytes bls_proof_of_possession = 7;  // 96 bytes
+  WarpMessageBytes warp_message = 8;
+
+  // Rust-serialized bytes for comparison
+  bytes serialized_tx = 9;
+}
+
+// SetL1ValidatorWeightTx updates validator weight via Warp message (Type ID: 34)
+message SetL1ValidatorWeightTxRequest {
+  // Base transaction fields
+  uint32 network_id = 1;
+  bytes blockchain_id = 2;
+  repeated TransferableOutput outputs = 3;
+  repeated TransferableInput inputs = 4;
+  bytes memo = 5;
+
+  // SetL1ValidatorWeightTx specific fields
+  WarpMessageBytes warp_message = 6;
+
+  // Rust-serialized bytes for comparison
+  bytes serialized_tx = 7;
+}
+
+// IncreaseL1ValidatorBalanceTx adds to a validator's balance (Type ID: 36)
+message IncreaseL1ValidatorBalanceTxRequest {
+  // Base transaction fields
+  uint32 network_id = 1;
+  bytes blockchain_id = 2;
+  repeated TransferableOutput outputs = 3;
+  repeated TransferableInput inputs = 4;
+  bytes memo = 5;
+
+  // IncreaseL1ValidatorBalanceTx specific fields
+  bytes validation_id = 6;  // 32 bytes
+  uint64 balance = 7;
+
+  // Rust-serialized bytes for comparison
+  bytes serialized_tx = 8;
+}
+
+// DisableL1ValidatorTx deactivates a validator (Type ID: 35)
+message DisableL1ValidatorTxRequest {
+  // Base transaction fields
+  uint32 network_id = 1;
+  bytes blockchain_id = 2;
+  repeated TransferableOutput outputs = 3;
+  repeated TransferableInput inputs = 4;
+  bytes memo = 5;
+
+  // DisableL1ValidatorTx specific fields
+  bytes validation_id = 6;  // 32 bytes
+  bytes subnet_auth = 7;
+
+  // Rust-serialized bytes for comparison
+  bytes serialized_tx = 8;
+}
+
+// ============================================================================
+// Warp Message Types
+// ============================================================================
+
+// Warp UnsignedMessage serialization
+message WarpUnsignedMessageRequest {
+  uint32 network_id = 1;
+  bytes source_chain_id = 2;  // 32 bytes
+  bytes payload = 3;
+
+  // Rust-serialized bytes for comparison
+  bytes serialized_msg = 4;
+}
+
+// Warp Message (with aggregated BLS signature)
+message WarpMessageRequest {
+  bytes unsigned_message = 1;  // Serialized UnsignedMessage
+  bytes signature_bit_set = 2;
+  bytes signature = 3;  // Aggregated BLS signature (96 bytes)
+
+  // Rust-serialized bytes for comparison
+  bytes serialized_msg = 4;
+}
+
+// Helper type for including warp message in transactions
+message WarpMessageBytes {
+  bytes unsigned_message = 1;
+  bytes signature_bit_set = 2;
+  bytes signature = 3;
+}
+
+// ============================================================================
+// Warp Payload Types (encoded in UnsignedMessage.payload)
+// ============================================================================
+
+// RegisterL1ValidatorMessage payload (Type ID: 1)
+message RegisterL1ValidatorPayloadRequest {
+  bytes subnet_id = 1;
+  bytes node_id = 2;        // 20 bytes
+  bytes bls_public_key = 3; // 48 bytes
+  uint64 expiry = 4;
+  PChainOwner remaining_balance_owner = 5;
+  PChainOwner disable_owner = 6;
+  uint64 weight = 7;
+
+  // Rust-serialized bytes for comparison
+  bytes serialized_payload = 8;
+}
+
+// L1ValidatorWeightMessage payload (Type ID: 3)
+message L1ValidatorWeightPayloadRequest {
+  bytes validation_id = 1;  // 32 bytes
+  uint64 nonce = 2;
+  uint64 weight = 3;
+
+  // Rust-serialized bytes for comparison
+  bytes serialized_payload = 4;
+}
+
+// SubnetToL1ConversionMessage payload (Type ID: 0)
+message SubnetToL1ConversionPayloadRequest {
+  bytes subnet_id = 1;  // 32 bytes
+
+  // Rust-serialized bytes for comparison
+  bytes serialized_payload = 2;
+}
+
+// ============================================================================
+// Common Types
+// ============================================================================
+
+// P-Chain owner for validator management
+message PChainOwner {
+  uint32 threshold = 1;
+  repeated bytes addresses = 2;  // Each address is 20 bytes
+}
+
+// Initial L1 validator for subnet conversion
+message InitialL1Validator {
+  bytes node_id = 1;          // 20 bytes
+  bytes bls_public_key = 2;   // 48 bytes
+  uint64 weight = 3;
+  PChainOwner remaining_balance_owner = 4;
+  PChainOwner deactivation_owner = 5;
+}
+
+// UTXO output reference
+message TransferableOutput {
+  bytes asset_id = 1;  // 32 bytes
+  OutputPayload output = 2;
+}
+
+// UTXO input reference
+message TransferableInput {
+  bytes tx_id = 1;      // 32 bytes
+  uint32 output_index = 2;
+  bytes asset_id = 3;   // 32 bytes
+  InputPayload input = 4;
+}
+
+// Output payload (SECP256K1 transfer output)
+message OutputPayload {
+  uint64 amount = 1;
+  uint64 locktime = 2;
+  uint32 threshold = 3;
+  repeated bytes addresses = 4;  // Each address is 20 bytes
+}
+
+// Input payload (SECP256K1 transfer input)
+message InputPayload {
+  uint64 amount = 1;
+  repeated uint32 sig_indices = 2;
+}

@@ -534,6 +534,19 @@ impl Packer {
         self.unpack_bytes(n as usize)
     }
 
+    /// Packs the "u8" slice to the offset, with u64 length header.
+    /// Used by Warp messages which use 8-byte length headers.
+    pub fn pack_bytes_with_header_u64(&self, v: &[u8]) -> Result<()> {
+        self.pack_u64(v.len() as u64)?;
+        self.pack_bytes(v)
+    }
+
+    /// Unpacks the "u8" slice with u64 length header.
+    pub fn unpack_bytes_with_header_u64(&self) -> Result<Vec<u8>> {
+        let n = self.unpack_u64()?;
+        self.unpack_bytes(n as usize)
+    }
+
     /// Writes the two-dimensional "u8" slice from the offset and increments the offset as much.
     /// ref. "avalanchego/utils/wrappers.Packer.PackFixedByteSlices"
     /// ref. <https://pkg.go.dev/github.com/ava-labs/avalanchego/utils/wrappers#Packer.PackFixedByteSlices>
