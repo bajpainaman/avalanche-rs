@@ -14,9 +14,6 @@ import (
 	"time"
 
 	"github.com/ava-labs/avalanche-rs/avalanchego-conformance/rpcpb"
-	"github.com/ava-labs/avalanchego/cache"
-	"github.com/ava-labs/avalanchego/ids"
-	"github.com/ava-labs/avalanchego/utils/crypto/secp256k1"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
@@ -43,8 +40,6 @@ type server struct {
 	gRPCRegisterOnce sync.Once
 
 	mu *sync.RWMutex
-
-	secpFactory *secp256k1.Factory
 
 	rpcpb.UnimplementedPingServiceServer
 	rpcpb.UnimplementedKeyServiceServer
@@ -73,12 +68,6 @@ func New(cfg Config) (Server, error) {
 
 		ln:         ln,
 		gRPCServer: grpc.NewServer(),
-
-		secpFactory: &secp256k1.Factory{
-			Cache: cache.LRU[ids.ID, *secp256k1.PublicKey]{
-				Size: 256,
-			},
-		},
 
 		mu: new(sync.RWMutex),
 	}, nil

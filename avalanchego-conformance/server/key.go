@@ -16,10 +16,11 @@ import (
 	"github.com/ava-labs/avalanchego/utils/cb58"
 	"github.com/ava-labs/avalanchego/utils/constants"
 	"github.com/ava-labs/avalanchego/utils/crypto/bls"
+	"github.com/ava-labs/avalanchego/utils/crypto/bls/signer/localsigner"
 	"github.com/ava-labs/avalanchego/utils/crypto/secp256k1"
 	"github.com/ava-labs/avalanchego/utils/formatting/address"
 	"github.com/ava-labs/avalanchego/utils/hashing"
-	eth_crypto "github.com/ethereum/go-ethereum/crypto"
+	eth_crypto "github.com/ava-labs/libevm/crypto"
 	"go.uber.org/zap"
 )
 
@@ -44,7 +45,8 @@ func (s *server) Secp256K1RecoverHashPublicKey(ctx context.Context, req *rpcpb.S
 	zap.L().Debug("received Secp256K1RecoverHashPublicKey request")
 
 	resp := &rpcpb.Secp256K1RecoverHashPublicKeyResponse{Success: true}
-	pubkey, err := s.secpFactory.RecoverHashPublicKey(req.Message, req.Signature)
+	// v1.13.5: use standalone function instead of Factory method
+	pubkey, err := secp256k1.RecoverPublicKeyFromHash(req.Message, req.Signature)
 	if err != nil {
 		resp.Message = fmt.Sprintf("failed RecoverHashPublicKey %v", err)
 		resp.Success = false
@@ -156,8 +158,8 @@ func decodePrivateKey(enc string) (*secp256k1.PrivateKey, error) {
 		return nil, err
 	}
 
-	keyFactory := new(secp256k1.Factory)
-	return keyFactory.ToPrivateKey(skBytes)
+	// v1.13.5: use standalone function instead of Factory
+	return secp256k1.ToPrivateKey(skBytes)
 }
 
 func encodeAddr(pk *secp256k1.PrivateKey, chainIDAlias string, hrp string) (string, error) {
@@ -177,12 +179,14 @@ func encodeEthAddr(pk *secp256k1.PrivateKey) string {
 func (s *server) BlsSignature(ctx context.Context, req *rpcpb.BlsSignatureRequest) (*rpcpb.BlsSignatureResponse, error) {
 	zap.L().Debug("received BlsSignature request")
 
-	sk, err := bls.SecretKeyFromBytes(req.PrivateKey)
+	// v1.13.5: use localsigner.FromBytes instead of bls.SecretKeyFromBytes
+	signer, err := localsigner.FromBytes(req.PrivateKey)
 	if err != nil {
 		return nil, err
 	}
 
-	pubkey, err := bls.PublicKeyFromBytes(req.PublicKey)
+	// v1.13.5: use bls.PublicKeyFromCompressedBytes instead of bls.PublicKeyFromBytes
+	pubkey, err := bls.PublicKeyFromCompressedBytes(req.PublicKey)
 	if err != nil {
 		return nil, err
 	}
@@ -192,7 +196,11 @@ func (s *server) BlsSignature(ctx context.Context, req *rpcpb.BlsSignatureReques
 	}
 
 	zap.L().Info("verifying Signature")
-	sig := bls.Sign(sk, req.Message)
+	// v1.13.5: use signer.Sign instead of bls.Sign
+	sig, err := signer.Sign(req.Message)
+	if err != nil {
+		return nil, err
+	}
 	if !bls.Verify(pubkey, sig, req.Message) {
 		if resp.Message != "" {
 			resp.Message += ", "
@@ -215,7 +223,11 @@ func (s *server) BlsSignature(ctx context.Context, req *rpcpb.BlsSignatureReques
 	}
 
 	zap.L().Info("verifying SignatureProofOfPossession")
-	sigPoP := bls.SignProofOfPossession(sk, req.Message)
+	// v1.13.5: use signer.SignProofOfPossession instead of bls.SignProofOfPossession
+	sigPoP, err := signer.SignProofOfPossession(req.Message)
+	if err != nil {
+		return nil, err
+	}
 	if !bls.VerifyProofOfPossession(pubkey, sigPoP, req.Message) {
 		if resp.Message != "" {
 			resp.Message += ", "

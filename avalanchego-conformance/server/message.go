@@ -1,55 +1,88 @@
 // Copyright (C) 2019-2022, Ava Labs, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
+// Package server implements the avalanchego-conformance gRPC server.
+// NOTE: Updated for avalanchego v1.14.0 (Granite) API changes:
+// - message.NewCreator: 5 args -> 3 args
+// - compression.TypeGzip -> compression.TypeZstd
+// - AcceptedFrontier: []ids.ID -> single ids.ID
+// - Chits: completely new signature
+// - Ping/Pong: parameters swapped
+// - Many methods lost engineType parameter
+// - Version method: REMOVED from Creator interface
+// - PeerList: []ClaimedIPPort -> []*ClaimedIPPort with new struct fields
+
 package server
 
 import (
 	"bytes"
-	"compress/gzip"
 	"context"
-	"crypto/x509"
 	"encoding/binary"
 	"fmt"
-	"io"
-	"net"
+	"net/netip"
 	"time"
 
 	"github.com/ava-labs/avalanche-rs/avalanchego-conformance/rpcpb"
 	"github.com/ava-labs/avalanchego/ids"
 	"github.com/ava-labs/avalanchego/message"
 	"github.com/ava-labs/avalanchego/proto/pb/p2p"
+	"github.com/ava-labs/avalanchego/staking"
 	"github.com/ava-labs/avalanchego/utils/compression"
 	"github.com/ava-labs/avalanchego/utils/ips"
-	"github.com/ava-labs/avalanchego/utils/logging"
 	"github.com/ava-labs/avalanchego/utils/wrappers"
+	"github.com/klauspost/compress/zstd"
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
 )
 
+// createMessageCreator creates a message.Creator with the v1.14.0 API
+// NewCreator signature changed from 5 args to 3 args:
+// Old: (logger, registerer, namespace, compressionType, maxMessageTimeout)
+// New: (registerer, compressionType, maxMessageTimeout)
+func createMessageCreator(useCompression bool) (message.Creator, error) {
+	compressType := compression.TypeNone
+	if useCompression {
+		compressType = compression.TypeZstd // v1.14.0 uses zstd instead of gzip
+	}
+	return message.NewCreator(
+		prometheus.NewRegistry(),
+		compressType,
+		10*time.Second,
+	)
+}
+
+// decompressZstd decompresses zstd-compressed data
+func decompressZstd(data []byte) ([]byte, error) {
+	decoder, err := zstd.NewReader(nil)
+	if err != nil {
+		return nil, err
+	}
+	defer decoder.Close()
+	return decoder.DecodeAll(data, nil)
+}
+
 func (s *server) AcceptedFrontier(ctx context.Context, req *rpcpb.AcceptedFrontierRequest) (*rpcpb.AcceptedFrontierResponse, error) {
 	zap.L().Debug("received AcceptedFrontier request")
 
-	mc, err := message.NewCreator(logging.NoLog{}, prometheus.NewRegistry(), "", compression.TypeNone, 10*time.Second)
+	mc, err := createMessageCreator(false)
 	if err != nil {
 		return nil, err
 	}
 
-	chainID := [32]byte{}
+	chainID := ids.ID{}
 	copy(chainID[:], req.ChainId)
 
-	containersIDs := make([]ids.ID, 0, len(req.ContainerIds))
-	for _, b := range req.ContainerIds {
-		bb := [32]byte{}
-		copy(bb[:], b)
-		containersIDs = append(containersIDs, ids.ID(bb))
+	// v1.14.0: AcceptedFrontier now takes a single containerID instead of a slice
+	var containerID ids.ID
+	if len(req.ContainerIds) > 0 {
+		copy(containerID[:], req.ContainerIds[0])
 	}
 
-	msg, err := mc.AcceptedFrontier(chainID, req.RequestId, containersIDs)
+	msg, err := mc.AcceptedFrontier(chainID, req.RequestId, containerID)
 	if err != nil {
 		return nil, err
 	}
 
-	// ref. "network/peer.writeMessages"
 	msgBytes := msg.Bytes()
 	msgLen := uint32(len(msgBytes))
 	msgLenBytes := [wrappers.IntLen]byte{}
@@ -71,23 +104,19 @@ func (s *server) AcceptedFrontier(ctx context.Context, req *rpcpb.AcceptedFronti
 func (s *server) AcceptedStateSummary(ctx context.Context, req *rpcpb.AcceptedStateSummaryRequest) (*rpcpb.AcceptedStateSummaryResponse, error) {
 	zap.L().Debug("received AcceptedStateSummary request")
 
-	compressType := compression.TypeNone
-	if req.GzipCompressed {
-		compressType = compression.TypeGzip
-	}
-	mc, err := message.NewCreator(logging.NoLog{}, prometheus.NewRegistry(), "", compressType, 10*time.Second)
+	mc, err := createMessageCreator(req.GzipCompressed)
 	if err != nil {
 		return nil, err
 	}
 
-	chainID := [32]byte{}
+	chainID := ids.ID{}
 	copy(chainID[:], req.ChainId)
 
 	summaryIDs := make([]ids.ID, 0, len(req.SummaryIds))
 	for _, b := range req.SummaryIds {
-		bb := [32]byte{}
-		copy(bb[:], b)
-		summaryIDs = append(summaryIDs, ids.ID(bb))
+		var id ids.ID
+		copy(id[:], b)
+		summaryIDs = append(summaryIDs, id)
 	}
 
 	msg, err := mc.AcceptedStateSummary(chainID, req.RequestId, summaryIDs)
@@ -95,7 +124,6 @@ func (s *server) AcceptedStateSummary(ctx context.Context, req *rpcpb.AcceptedSt
 		return nil, err
 	}
 
-	// ref. "network/peer.writeMessages"
 	msgBytes := msg.Bytes()
 	msgLen := uint32(len(msgBytes))
 	msgLenBytes := [wrappers.IntLen]byte{}
@@ -111,25 +139,14 @@ func (s *server) AcceptedStateSummary(ctx context.Context, req *rpcpb.AcceptedSt
 		resp.Success = false
 	}
 	if req.GzipCompressed {
-		// gzip/flate2 in Rust/Go are compatible but outputs are different
-		rd := new(gzip.Reader)
-		// +2; 1 for type ID, 1 for compressible boolean
-		if err = rd.Reset(bytes.NewReader(expected[wrappers.IntLen+2:])); err != nil {
-			return nil, err
-		}
-		expectedDecompressed, err := io.ReadAll(rd)
+		// v1.14.0 uses zstd compression
+		expectedDecompressed, err := decompressZstd(expected[wrappers.IntLen+2:])
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to decompress expected: %w", err)
 		}
-
-		rd = new(gzip.Reader)
-		// +2; 1 for type ID, 1 for compressible boolean
-		if err = rd.Reset(bytes.NewReader(req.SerializedMsg[wrappers.IntLen+2:])); err != nil {
-			return nil, err
-		}
-		receivedDecompressed, err := io.ReadAll(rd)
+		receivedDecompressed, err := decompressZstd(req.SerializedMsg[wrappers.IntLen+2:])
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to decompress received: %w", err)
 		}
 		if !bytes.Equal(expectedDecompressed, receivedDecompressed) {
 			resp.Message = fmt.Sprintf("decompressed output expected [%x], got [%x]", expectedDecompressed, receivedDecompressed)
@@ -143,19 +160,19 @@ func (s *server) AcceptedStateSummary(ctx context.Context, req *rpcpb.AcceptedSt
 func (s *server) Accepted(ctx context.Context, req *rpcpb.AcceptedRequest) (*rpcpb.AcceptedResponse, error) {
 	zap.L().Debug("received Accepted request")
 
-	mc, err := message.NewCreator(logging.NoLog{}, prometheus.NewRegistry(), "", compression.TypeNone, 10*time.Second)
+	mc, err := createMessageCreator(false)
 	if err != nil {
 		return nil, err
 	}
 
-	chainID := [32]byte{}
+	chainID := ids.ID{}
 	copy(chainID[:], req.ChainId)
 
 	containersIDs := make([]ids.ID, 0, len(req.ContainerIds))
 	for _, b := range req.ContainerIds {
-		bb := [32]byte{}
-		copy(bb[:], b)
-		containersIDs = append(containersIDs, ids.ID(bb))
+		var id ids.ID
+		copy(id[:], b)
+		containersIDs = append(containersIDs, id)
 	}
 
 	msg, err := mc.Accepted(chainID, req.RequestId, containersIDs)
@@ -163,7 +180,6 @@ func (s *server) Accepted(ctx context.Context, req *rpcpb.AcceptedRequest) (*rpc
 		return nil, err
 	}
 
-	// ref. "network/peer.writeMessages"
 	msgBytes := msg.Bytes()
 	msgLen := uint32(len(msgBytes))
 	msgLenBytes := [wrappers.IntLen]byte{}
@@ -185,16 +201,12 @@ func (s *server) Accepted(ctx context.Context, req *rpcpb.AcceptedRequest) (*rpc
 func (s *server) Ancestors(ctx context.Context, req *rpcpb.AncestorsRequest) (*rpcpb.AncestorsResponse, error) {
 	zap.L().Debug("received Ancestors request")
 
-	compressType := compression.TypeNone
-	if req.GzipCompressed {
-		compressType = compression.TypeGzip
-	}
-	mc, err := message.NewCreator(logging.NoLog{}, prometheus.NewRegistry(), "", compressType, 10*time.Second)
+	mc, err := createMessageCreator(req.GzipCompressed)
 	if err != nil {
 		return nil, err
 	}
 
-	chainID := [32]byte{}
+	chainID := ids.ID{}
 	copy(chainID[:], req.ChainId)
 
 	msg, err := mc.Ancestors(chainID, req.RequestId, req.Containers)
@@ -202,7 +214,6 @@ func (s *server) Ancestors(ctx context.Context, req *rpcpb.AncestorsRequest) (*r
 		return nil, err
 	}
 
-	// ref. "network/peer.writeMessages"
 	msgBytes := msg.Bytes()
 	msgLen := uint32(len(msgBytes))
 	msgLenBytes := [wrappers.IntLen]byte{}
@@ -218,25 +229,13 @@ func (s *server) Ancestors(ctx context.Context, req *rpcpb.AncestorsRequest) (*r
 		resp.Success = false
 	}
 	if req.GzipCompressed {
-		// gzip/flate2 in Rust/Go are compatible but outputs are different
-		rd := new(gzip.Reader)
-		// +2; 1 for type ID, 1 for compressible boolean
-		if err = rd.Reset(bytes.NewReader(expected[wrappers.IntLen+2:])); err != nil {
-			return nil, err
-		}
-		expectedDecompressed, err := io.ReadAll(rd)
+		expectedDecompressed, err := decompressZstd(expected[wrappers.IntLen+2:])
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to decompress expected: %w", err)
 		}
-
-		rd = new(gzip.Reader)
-		// +2; 1 for type ID, 1 for compressible boolean
-		if err = rd.Reset(bytes.NewReader(req.SerializedMsg[wrappers.IntLen+2:])); err != nil {
-			return nil, err
-		}
-		receivedDecompressed, err := io.ReadAll(rd)
+		receivedDecompressed, err := decompressZstd(req.SerializedMsg[wrappers.IntLen+2:])
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to decompress received: %w", err)
 		}
 		if !bytes.Equal(expectedDecompressed, receivedDecompressed) {
 			resp.Message = fmt.Sprintf("decompressed output expected [%x], got [%x]", expectedDecompressed, receivedDecompressed)
@@ -250,16 +249,12 @@ func (s *server) Ancestors(ctx context.Context, req *rpcpb.AncestorsRequest) (*r
 func (s *server) AppGossip(ctx context.Context, req *rpcpb.AppGossipRequest) (*rpcpb.AppGossipResponse, error) {
 	zap.L().Debug("received AppGossip request")
 
-	compressType := compression.TypeNone
-	if req.GzipCompressed {
-		compressType = compression.TypeGzip
-	}
-	mc, err := message.NewCreator(logging.NoLog{}, prometheus.NewRegistry(), "", compressType, 10*time.Second)
+	mc, err := createMessageCreator(req.GzipCompressed)
 	if err != nil {
 		return nil, err
 	}
 
-	chainID := [32]byte{}
+	chainID := ids.ID{}
 	copy(chainID[:], req.ChainId)
 
 	msg, err := mc.AppGossip(chainID, req.AppBytes)
@@ -267,7 +262,6 @@ func (s *server) AppGossip(ctx context.Context, req *rpcpb.AppGossipRequest) (*r
 		return nil, err
 	}
 
-	// ref. "network/peer.writeMessages"
 	msgBytes := msg.Bytes()
 	msgLen := uint32(len(msgBytes))
 	msgLenBytes := [wrappers.IntLen]byte{}
@@ -283,25 +277,13 @@ func (s *server) AppGossip(ctx context.Context, req *rpcpb.AppGossipRequest) (*r
 		resp.Success = false
 	}
 	if req.GzipCompressed {
-		// gzip/flate2 in Rust/Go are compatible but outputs are different
-		rd := new(gzip.Reader)
-		// +2; 1 for type ID, 1 for compressible boolean
-		if err = rd.Reset(bytes.NewReader(expected[wrappers.IntLen+2:])); err != nil {
-			return nil, err
-		}
-		expectedDecompressed, err := io.ReadAll(rd)
+		expectedDecompressed, err := decompressZstd(expected[wrappers.IntLen+2:])
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to decompress expected: %w", err)
 		}
-
-		rd = new(gzip.Reader)
-		// +2; 1 for type ID, 1 for compressible boolean
-		if err = rd.Reset(bytes.NewReader(req.SerializedMsg[wrappers.IntLen+2:])); err != nil {
-			return nil, err
-		}
-		receivedDecompressed, err := io.ReadAll(rd)
+		receivedDecompressed, err := decompressZstd(req.SerializedMsg[wrappers.IntLen+2:])
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to decompress received: %w", err)
 		}
 		if !bytes.Equal(expectedDecompressed, receivedDecompressed) {
 			resp.Message = fmt.Sprintf("decompressed output expected [%x], got [%x]", expectedDecompressed, receivedDecompressed)
@@ -315,16 +297,12 @@ func (s *server) AppGossip(ctx context.Context, req *rpcpb.AppGossipRequest) (*r
 func (s *server) AppRequest(ctx context.Context, req *rpcpb.AppRequestRequest) (*rpcpb.AppRequestResponse, error) {
 	zap.L().Debug("received AppRequest request")
 
-	compressType := compression.TypeNone
-	if req.GzipCompressed {
-		compressType = compression.TypeGzip
-	}
-	mc, err := message.NewCreator(logging.NoLog{}, prometheus.NewRegistry(), "", compressType, 10*time.Second)
+	mc, err := createMessageCreator(req.GzipCompressed)
 	if err != nil {
 		return nil, err
 	}
 
-	chainID := [32]byte{}
+	chainID := ids.ID{}
 	copy(chainID[:], req.ChainId)
 
 	msg, err := mc.AppRequest(chainID, req.RequestId, time.Duration(req.Deadline), req.AppBytes)
@@ -332,7 +310,6 @@ func (s *server) AppRequest(ctx context.Context, req *rpcpb.AppRequestRequest) (
 		return nil, err
 	}
 
-	// ref. "network/peer.writeMessages"
 	msgBytes := msg.Bytes()
 	msgLen := uint32(len(msgBytes))
 	msgLenBytes := [wrappers.IntLen]byte{}
@@ -348,25 +325,13 @@ func (s *server) AppRequest(ctx context.Context, req *rpcpb.AppRequestRequest) (
 		resp.Success = false
 	}
 	if req.GzipCompressed {
-		// gzip/flate2 in Rust/Go are compatible but outputs are different
-		rd := new(gzip.Reader)
-		// +2; 1 for type ID, 1 for compressible boolean
-		if err = rd.Reset(bytes.NewReader(expected[wrappers.IntLen+2:])); err != nil {
-			return nil, err
-		}
-		expectedDecompressed, err := io.ReadAll(rd)
+		expectedDecompressed, err := decompressZstd(expected[wrappers.IntLen+2:])
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to decompress expected: %w", err)
 		}
-
-		rd = new(gzip.Reader)
-		// +2; 1 for type ID, 1 for compressible boolean
-		if err = rd.Reset(bytes.NewReader(req.SerializedMsg[wrappers.IntLen+2:])); err != nil {
-			return nil, err
-		}
-		receivedDecompressed, err := io.ReadAll(rd)
+		receivedDecompressed, err := decompressZstd(req.SerializedMsg[wrappers.IntLen+2:])
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to decompress received: %w", err)
 		}
 		if !bytes.Equal(expectedDecompressed, receivedDecompressed) {
 			resp.Message = fmt.Sprintf("decompressed output expected [%x], got [%x]", expectedDecompressed, receivedDecompressed)
@@ -380,16 +345,12 @@ func (s *server) AppRequest(ctx context.Context, req *rpcpb.AppRequestRequest) (
 func (s *server) AppResponse(ctx context.Context, req *rpcpb.AppResponseRequest) (*rpcpb.AppResponseResponse, error) {
 	zap.L().Debug("received AppResponse request")
 
-	compressType := compression.TypeNone
-	if req.GzipCompressed {
-		compressType = compression.TypeGzip
-	}
-	mc, err := message.NewCreator(logging.NoLog{}, prometheus.NewRegistry(), "", compressType, 10*time.Second)
+	mc, err := createMessageCreator(req.GzipCompressed)
 	if err != nil {
 		return nil, err
 	}
 
-	chainID := [32]byte{}
+	chainID := ids.ID{}
 	copy(chainID[:], req.ChainId)
 
 	msg, err := mc.AppResponse(chainID, req.RequestId, req.AppBytes)
@@ -397,7 +358,6 @@ func (s *server) AppResponse(ctx context.Context, req *rpcpb.AppResponseRequest)
 		return nil, err
 	}
 
-	// ref. "network/peer.writeMessages"
 	msgBytes := msg.Bytes()
 	msgLen := uint32(len(msgBytes))
 	msgLenBytes := [wrappers.IntLen]byte{}
@@ -413,25 +373,13 @@ func (s *server) AppResponse(ctx context.Context, req *rpcpb.AppResponseRequest)
 		resp.Success = false
 	}
 	if req.GzipCompressed {
-		// gzip/flate2 in Rust/Go are compatible but outputs are different
-		rd := new(gzip.Reader)
-		// +2; 1 for type ID, 1 for compressible boolean
-		if err = rd.Reset(bytes.NewReader(expected[wrappers.IntLen+2:])); err != nil {
-			return nil, err
-		}
-		expectedDecompressed, err := io.ReadAll(rd)
+		expectedDecompressed, err := decompressZstd(expected[wrappers.IntLen+2:])
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to decompress expected: %w", err)
 		}
-
-		rd = new(gzip.Reader)
-		// +2; 1 for type ID, 1 for compressible boolean
-		if err = rd.Reset(bytes.NewReader(req.SerializedMsg[wrappers.IntLen+2:])); err != nil {
-			return nil, err
-		}
-		receivedDecompressed, err := io.ReadAll(rd)
+		receivedDecompressed, err := decompressZstd(req.SerializedMsg[wrappers.IntLen+2:])
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to decompress received: %w", err)
 		}
 		if !bytes.Equal(expectedDecompressed, receivedDecompressed) {
 			resp.Message = fmt.Sprintf("decompressed output expected [%x], got [%x]", expectedDecompressed, receivedDecompressed)
@@ -445,27 +393,30 @@ func (s *server) AppResponse(ctx context.Context, req *rpcpb.AppResponseRequest)
 func (s *server) Chits(ctx context.Context, req *rpcpb.ChitsRequest) (*rpcpb.ChitsResponse, error) {
 	zap.L().Debug("received Chits request")
 
-	mc, err := message.NewCreator(logging.NoLog{}, prometheus.NewRegistry(), "", compression.TypeNone, 10*time.Second)
+	mc, err := createMessageCreator(false)
 	if err != nil {
 		return nil, err
 	}
 
-	containersIDs := make([]ids.ID, 0, len(req.ContainerIds))
-	for _, b := range req.ContainerIds {
-		bb := [32]byte{}
-		copy(bb[:], b)
-		containersIDs = append(containersIDs, ids.ID(bb))
-	}
-
-	chainID := [32]byte{}
+	chainID := ids.ID{}
 	copy(chainID[:], req.ChainId)
 
-	msg, err := mc.Chits(ids.ID(chainID), req.RequestId, containersIDs, nil)
+	// v1.14.0: Chits signature changed completely
+	// Old: Chits(chainID, requestID, containerIDs []ids.ID, ???)
+	// New: Chits(chainID, requestID, preferredID, preferredIDAtHeight, acceptedID ids.ID, acceptedHeight uint64)
+	var preferredID, preferredIDAtHeight, acceptedID ids.ID
+	if len(req.ContainerIds) > 0 {
+		copy(preferredID[:], req.ContainerIds[0])
+	}
+	if len(req.ContainerIds) > 1 {
+		copy(acceptedID[:], req.ContainerIds[1])
+	}
+
+	msg, err := mc.Chits(chainID, req.RequestId, preferredID, preferredIDAtHeight, acceptedID, 0)
 	if err != nil {
 		return nil, err
 	}
 
-	// ref. "network/peer.writeMessages"
 	msgBytes := msg.Bytes()
 	msgLen := uint32(len(msgBytes))
 	msgLenBytes := [wrappers.IntLen]byte{}
@@ -477,7 +428,7 @@ func (s *server) Chits(ctx context.Context, req *rpcpb.ChitsRequest) (*rpcpb.Chi
 		Success:               true,
 	}
 	if !bytes.Equal(req.SerializedMsg, expected) {
-		resp.Message = fmt.Sprintf("expected 0x%x", expected)
+		resp.Message = fmt.Sprintf("expected 0x%x (note: Chits API changed in v1.14.0)", expected)
 		resp.Success = false
 	}
 
@@ -487,20 +438,20 @@ func (s *server) Chits(ctx context.Context, req *rpcpb.ChitsRequest) (*rpcpb.Chi
 func (s *server) GetAcceptedFrontier(ctx context.Context, req *rpcpb.GetAcceptedFrontierRequest) (*rpcpb.GetAcceptedFrontierResponse, error) {
 	zap.L().Debug("received GetAcceptedFrontier request")
 
-	mc, err := message.NewCreator(logging.NoLog{}, prometheus.NewRegistry(), "", compression.TypeNone, 10*time.Second)
+	mc, err := createMessageCreator(false)
 	if err != nil {
 		return nil, err
 	}
 
-	chainID := [32]byte{}
+	chainID := ids.ID{}
 	copy(chainID[:], req.ChainId)
 
-	msg, err := mc.GetAcceptedFrontier(chainID, req.RequestId, time.Duration(req.Deadline), p2p.EngineType_ENGINE_TYPE_SNOWMAN)
+	// v1.14.0: removed engineType parameter
+	msg, err := mc.GetAcceptedFrontier(chainID, req.RequestId, time.Duration(req.Deadline))
 	if err != nil {
 		return nil, err
 	}
 
-	// ref. "network/peer.writeMessages"
 	msgBytes := msg.Bytes()
 	msgLen := uint32(len(msgBytes))
 	msgLenBytes := [wrappers.IntLen]byte{}
@@ -522,16 +473,12 @@ func (s *server) GetAcceptedFrontier(ctx context.Context, req *rpcpb.GetAccepted
 func (s *server) GetAcceptedStateSummary(ctx context.Context, req *rpcpb.GetAcceptedStateSummaryRequest) (*rpcpb.GetAcceptedStateSummaryResponse, error) {
 	zap.L().Debug("received GetAcceptedStateSummary request")
 
-	compressType := compression.TypeNone
-	if req.GzipCompressed {
-		compressType = compression.TypeGzip
-	}
-	mc, err := message.NewCreator(logging.NoLog{}, prometheus.NewRegistry(), "", compressType, 10*time.Second)
+	mc, err := createMessageCreator(req.GzipCompressed)
 	if err != nil {
 		return nil, err
 	}
 
-	chainID := [32]byte{}
+	chainID := ids.ID{}
 	copy(chainID[:], req.ChainId)
 
 	msg, err := mc.GetAcceptedStateSummary(chainID, req.RequestId, time.Duration(req.Deadline), req.Heights)
@@ -539,7 +486,6 @@ func (s *server) GetAcceptedStateSummary(ctx context.Context, req *rpcpb.GetAcce
 		return nil, err
 	}
 
-	// ref. "network/peer.writeMessages"
 	msgBytes := msg.Bytes()
 	msgLen := uint32(len(msgBytes))
 	msgLenBytes := [wrappers.IntLen]byte{}
@@ -555,25 +501,13 @@ func (s *server) GetAcceptedStateSummary(ctx context.Context, req *rpcpb.GetAcce
 		resp.Success = false
 	}
 	if req.GzipCompressed {
-		// gzip/flate2 in Rust/Go are compatible but outputs are different
-		rd := new(gzip.Reader)
-		// +2; 1 for type ID, 1 for compressible boolean
-		if err = rd.Reset(bytes.NewReader(expected[wrappers.IntLen+2:])); err != nil {
-			return nil, err
-		}
-		expectedDecompressed, err := io.ReadAll(rd)
+		expectedDecompressed, err := decompressZstd(expected[wrappers.IntLen+2:])
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to decompress expected: %w", err)
 		}
-
-		rd = new(gzip.Reader)
-		// +2; 1 for type ID, 1 for compressible boolean
-		if err = rd.Reset(bytes.NewReader(req.SerializedMsg[wrappers.IntLen+2:])); err != nil {
-			return nil, err
-		}
-		receivedDecompressed, err := io.ReadAll(rd)
+		receivedDecompressed, err := decompressZstd(req.SerializedMsg[wrappers.IntLen+2:])
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to decompress received: %w", err)
 		}
 		if !bytes.Equal(expectedDecompressed, receivedDecompressed) {
 			resp.Message = fmt.Sprintf("decompressed output expected [%x], got [%x]", expectedDecompressed, receivedDecompressed)
@@ -587,27 +521,27 @@ func (s *server) GetAcceptedStateSummary(ctx context.Context, req *rpcpb.GetAcce
 func (s *server) GetAccepted(ctx context.Context, req *rpcpb.GetAcceptedRequest) (*rpcpb.GetAcceptedResponse, error) {
 	zap.L().Debug("received GetAccepted request")
 
-	mc, err := message.NewCreator(logging.NoLog{}, prometheus.NewRegistry(), "", compression.TypeNone, 10*time.Second)
+	mc, err := createMessageCreator(false)
 	if err != nil {
 		return nil, err
 	}
 
-	chainID := [32]byte{}
+	chainID := ids.ID{}
 	copy(chainID[:], req.ChainId)
 
 	containersIDs := make([]ids.ID, 0, len(req.ContainerIds))
 	for _, b := range req.ContainerIds {
-		bb := [32]byte{}
-		copy(bb[:], b)
-		containersIDs = append(containersIDs, ids.ID(bb))
+		var id ids.ID
+		copy(id[:], b)
+		containersIDs = append(containersIDs, id)
 	}
 
-	msg, err := mc.GetAccepted(chainID, req.RequestId, time.Duration(req.Deadline), containersIDs, p2p.EngineType_ENGINE_TYPE_SNOWMAN)
+	// v1.14.0: removed engineType parameter
+	msg, err := mc.GetAccepted(chainID, req.RequestId, time.Duration(req.Deadline), containersIDs)
 	if err != nil {
 		return nil, err
 	}
 
-	// ref. "network/peer.writeMessages"
 	msgBytes := msg.Bytes()
 	msgLen := uint32(len(msgBytes))
 	msgLenBytes := [wrappers.IntLen]byte{}
@@ -629,23 +563,24 @@ func (s *server) GetAccepted(ctx context.Context, req *rpcpb.GetAcceptedRequest)
 func (s *server) GetAncestors(ctx context.Context, req *rpcpb.GetAncestorsRequest) (*rpcpb.GetAncestorsResponse, error) {
 	zap.L().Debug("received GetAncestors request")
 
-	mc, err := message.NewCreator(logging.NoLog{}, prometheus.NewRegistry(), "", compression.TypeNone, 10*time.Second)
+	mc, err := createMessageCreator(false)
 	if err != nil {
 		return nil, err
 	}
 
-	chainID := [32]byte{}
+	chainID := ids.ID{}
 	copy(chainID[:], req.ChainId)
 
-	containerID := [32]byte{}
+	containerID := ids.ID{}
 	copy(containerID[:], req.ContainerId)
 
-	msg, err := mc.GetAncestors(chainID, req.RequestId, time.Duration(req.Deadline), containerID, p2p.EngineType_ENGINE_TYPE_SNOWMAN)
+	// v1.13.5: GetAncestors still has engineType parameter (unlike v1.14.0)
+	// ENGINE_TYPE_CHAIN is used for Snowman consensus (linear chain)
+	msg, err := mc.GetAncestors(chainID, req.RequestId, time.Duration(req.Deadline), containerID, p2p.EngineType_ENGINE_TYPE_CHAIN)
 	if err != nil {
 		return nil, err
 	}
 
-	// ref. "network/peer.writeMessages"
 	msgBytes := msg.Bytes()
 	msgLen := uint32(len(msgBytes))
 	msgLenBytes := [wrappers.IntLen]byte{}
@@ -667,12 +602,12 @@ func (s *server) GetAncestors(ctx context.Context, req *rpcpb.GetAncestorsReques
 func (s *server) GetStateSummaryFrontier(ctx context.Context, req *rpcpb.GetStateSummaryFrontierRequest) (*rpcpb.GetStateSummaryFrontierResponse, error) {
 	zap.L().Debug("received GetStateSummaryFrontier request")
 
-	mc, err := message.NewCreator(logging.NoLog{}, prometheus.NewRegistry(), "", compression.TypeNone, 10*time.Second)
+	mc, err := createMessageCreator(false)
 	if err != nil {
 		return nil, err
 	}
 
-	chainID := [32]byte{}
+	chainID := ids.ID{}
 	copy(chainID[:], req.ChainId)
 
 	msg, err := mc.GetStateSummaryFrontier(chainID, req.RequestId, time.Duration(req.Deadline))
@@ -680,7 +615,6 @@ func (s *server) GetStateSummaryFrontier(ctx context.Context, req *rpcpb.GetStat
 		return nil, err
 	}
 
-	// ref. "network/peer.writeMessages"
 	msgBytes := msg.Bytes()
 	msgLen := uint32(len(msgBytes))
 	msgLenBytes := [wrappers.IntLen]byte{}
@@ -702,23 +636,23 @@ func (s *server) GetStateSummaryFrontier(ctx context.Context, req *rpcpb.GetStat
 func (s *server) Get(ctx context.Context, req *rpcpb.GetRequest) (*rpcpb.GetResponse, error) {
 	zap.L().Debug("received Get request")
 
-	mc, err := message.NewCreator(logging.NoLog{}, prometheus.NewRegistry(), "", compression.TypeNone, 10*time.Second)
+	mc, err := createMessageCreator(false)
 	if err != nil {
 		return nil, err
 	}
 
-	chainID := [32]byte{}
+	chainID := ids.ID{}
 	copy(chainID[:], req.ChainId)
 
-	containerID := [32]byte{}
+	containerID := ids.ID{}
 	copy(containerID[:], req.ContainerId)
 
-	msg, err := mc.Get(chainID, req.RequestId, time.Duration(req.Deadline), containerID, p2p.EngineType_ENGINE_TYPE_SNOWMAN)
+	// v1.14.0: removed engineType parameter
+	msg, err := mc.Get(chainID, req.RequestId, time.Duration(req.Deadline), containerID)
 	if err != nil {
 		return nil, err
 	}
 
-	// ref. "network/peer.writeMessages"
 	msgBytes := msg.Bytes()
 	msgLen := uint32(len(msgBytes))
 	msgLenBytes := [wrappers.IntLen]byte{}
@@ -740,23 +674,34 @@ func (s *server) Get(ctx context.Context, req *rpcpb.GetRequest) (*rpcpb.GetResp
 func (s *server) Peerlist(ctx context.Context, req *rpcpb.PeerlistRequest) (*rpcpb.PeerlistResponse, error) {
 	zap.L().Debug("received Peerlist request")
 
-	compressType := compression.TypeNone
-	if req.GzipCompressed {
-		compressType = compression.TypeGzip
-	}
-	mc, err := message.NewCreator(logging.NoLog{}, prometheus.NewRegistry(), "", compressType, 10*time.Second)
+	mc, err := createMessageCreator(req.GzipCompressed)
 	if err != nil {
 		return nil, err
 	}
 
-	ipCerts := make([]ips.ClaimedIPPort, len(req.Peers))
+	// v1.14.0: PeerList now takes []*ips.ClaimedIPPort with *staking.Certificate and AddrPort
+	ipCerts := make([]*ips.ClaimedIPPort, len(req.Peers))
 	for i, p := range req.Peers {
-		ipCerts[i] = ips.ClaimedIPPort{
-			Cert: &x509.Certificate{Raw: p.Certificate},
-			IPPort: ips.IPPort{
-				IP:   p.IpAddr,
-				Port: uint16(p.IpPort),
-			},
+		// Parse IP address to netip.AddrPort
+		var addr netip.Addr
+		if len(p.IpAddr) == 4 {
+			addr = netip.AddrFrom4([4]byte(p.IpAddr))
+		} else if len(p.IpAddr) == 16 {
+			addr = netip.AddrFrom16([16]byte(p.IpAddr))
+		} else {
+			return nil, fmt.Errorf("invalid IP address format: expected 4 or 16 bytes, got %d", len(p.IpAddr))
+		}
+		addrPort := netip.AddrPortFrom(addr, uint16(p.IpPort))
+
+		// Parse certificate using staking package
+		cert, err := staking.ParseCertificate(p.Certificate)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse certificate: %w", err)
+		}
+
+		ipCerts[i] = &ips.ClaimedIPPort{
+			Cert:      cert,
+			AddrPort:  addrPort,
 			Timestamp: p.GetTimestamp(),
 			Signature: p.Sig,
 		}
@@ -767,7 +712,6 @@ func (s *server) Peerlist(ctx context.Context, req *rpcpb.PeerlistRequest) (*rpc
 		return nil, err
 	}
 
-	// ref. "network/peer.writeMessages"
 	msgBytes := msg.Bytes()
 	msgLen := uint32(len(msgBytes))
 	msgLenBytes := [wrappers.IntLen]byte{}
@@ -783,25 +727,13 @@ func (s *server) Peerlist(ctx context.Context, req *rpcpb.PeerlistRequest) (*rpc
 		resp.Success = false
 	}
 	if req.GzipCompressed {
-		// gzip/flate2 in Rust/Go are compatible but outputs are different
-		rd := new(gzip.Reader)
-		// +2; 1 for type ID, 1 for compressible boolean
-		if err = rd.Reset(bytes.NewReader(expected[wrappers.IntLen+2:])); err != nil {
-			return nil, err
-		}
-		expectedDecompressed, err := io.ReadAll(rd)
+		expectedDecompressed, err := decompressZstd(expected[wrappers.IntLen+2:])
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to decompress expected: %w", err)
 		}
-
-		rd = new(gzip.Reader)
-		// +2; 1 for type ID, 1 for compressible boolean
-		if err = rd.Reset(bytes.NewReader(req.SerializedMsg[wrappers.IntLen+2:])); err != nil {
-			return nil, err
-		}
-		receivedDecompressed, err := io.ReadAll(rd)
+		receivedDecompressed, err := decompressZstd(req.SerializedMsg[wrappers.IntLen+2:])
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to decompress received: %w", err)
 		}
 		if !bytes.Equal(expectedDecompressed, receivedDecompressed) {
 			resp.Message = fmt.Sprintf("decompressed output expected [%x], got [%x]", expectedDecompressed, receivedDecompressed)
@@ -815,16 +747,19 @@ func (s *server) Peerlist(ctx context.Context, req *rpcpb.PeerlistRequest) (*rpc
 func (s *server) Ping(ctx context.Context, req *rpcpb.PingRequest) (*rpcpb.PingResponse, error) {
 	zap.L().Debug("received Ping request")
 
-	mc, err := message.NewCreator(logging.NoLog{}, prometheus.NewRegistry(), "", compression.TypeNone, 10*time.Second)
-	if err != nil {
-		return nil, err
-	}
-	msg, err := mc.Ping()
+	mc, err := createMessageCreator(false)
 	if err != nil {
 		return nil, err
 	}
 
-	// ref. "network/peer.writeMessages"
+	// v1.14.0: Ping now takes primaryUptime parameter
+	// Old: Ping()
+	// New: Ping(primaryUptime uint32)
+	msg, err := mc.Ping(0)
+	if err != nil {
+		return nil, err
+	}
+
 	msgBytes := msg.Bytes()
 	msgLen := uint32(len(msgBytes))
 	msgLenBytes := [wrappers.IntLen]byte{}
@@ -846,16 +781,19 @@ func (s *server) Ping(ctx context.Context, req *rpcpb.PingRequest) (*rpcpb.PingR
 func (s *server) Pong(ctx context.Context, req *rpcpb.PongRequest) (*rpcpb.PongResponse, error) {
 	zap.L().Debug("received Pong request")
 
-	mc, err := message.NewCreator(logging.NoLog{}, prometheus.NewRegistry(), "", compression.TypeNone, 10*time.Second)
-	if err != nil {
-		return nil, err
-	}
-	msg, err := mc.Pong(req.UptimePct, nil)
+	mc, err := createMessageCreator(false)
 	if err != nil {
 		return nil, err
 	}
 
-	// ref. "network/peer.writeMessages"
+	// v1.14.0: Pong now takes no parameters
+	// Old: Pong(uptimePct, subnetUptimes)
+	// New: Pong()
+	msg, err := mc.Pong()
+	if err != nil {
+		return nil, err
+	}
+
 	msgBytes := msg.Bytes()
 	msgLen := uint32(len(msgBytes))
 	msgLenBytes := [wrappers.IntLen]byte{}
@@ -877,23 +815,25 @@ func (s *server) Pong(ctx context.Context, req *rpcpb.PongRequest) (*rpcpb.PongR
 func (s *server) PullQuery(ctx context.Context, req *rpcpb.PullQueryRequest) (*rpcpb.PullQueryResponse, error) {
 	zap.L().Debug("received PullQuery request")
 
-	mc, err := message.NewCreator(logging.NoLog{}, prometheus.NewRegistry(), "", compression.TypeNone, 10*time.Second)
+	mc, err := createMessageCreator(false)
 	if err != nil {
 		return nil, err
 	}
 
-	chainID := [32]byte{}
+	chainID := ids.ID{}
 	copy(chainID[:], req.ChainId)
 
-	containerID := [32]byte{}
+	containerID := ids.ID{}
 	copy(containerID[:], req.ContainerId)
 
-	msg, err := mc.PullQuery(ids.ID(chainID), req.RequestId, time.Duration(req.Deadline), ids.ID(containerID), p2p.EngineType_ENGINE_TYPE_SNOWMAN)
+	// v1.14.0: PullQuery now takes requestedHeight instead of engineType
+	// Old: PullQuery(chainID, requestID, deadline, containerID, engineType)
+	// New: PullQuery(chainID, requestID, deadline, containerID, requestedHeight uint64)
+	msg, err := mc.PullQuery(chainID, req.RequestId, time.Duration(req.Deadline), containerID, 0)
 	if err != nil {
 		return nil, err
 	}
 
-	// ref. "network/peer.writeMessages"
 	msgBytes := msg.Bytes()
 	msgLen := uint32(len(msgBytes))
 	msgLenBytes := [wrappers.IntLen]byte{}
@@ -915,24 +855,22 @@ func (s *server) PullQuery(ctx context.Context, req *rpcpb.PullQueryRequest) (*r
 func (s *server) PushQuery(ctx context.Context, req *rpcpb.PushQueryRequest) (*rpcpb.PushQueryResponse, error) {
 	zap.L().Debug("received PushQuery request")
 
-	compressType := compression.TypeNone
-	if req.GzipCompressed {
-		compressType = compression.TypeGzip
-	}
-	mc, err := message.NewCreator(logging.NoLog{}, prometheus.NewRegistry(), "", compressType, 10*time.Second)
+	mc, err := createMessageCreator(req.GzipCompressed)
 	if err != nil {
 		return nil, err
 	}
 
-	chainID := [32]byte{}
+	chainID := ids.ID{}
 	copy(chainID[:], req.ChainId)
 
-	msg, err := mc.PushQuery(ids.ID(chainID), req.RequestId, time.Duration(req.Deadline), req.ContainerBytes, p2p.EngineType_ENGINE_TYPE_SNOWMAN)
+	// v1.14.0: PushQuery now takes requestedHeight instead of engineType
+	// Old: PushQuery(chainID, requestID, deadline, container, engineType)
+	// New: PushQuery(chainID, requestID, deadline, container, requestedHeight uint64)
+	msg, err := mc.PushQuery(chainID, req.RequestId, time.Duration(req.Deadline), req.ContainerBytes, 0)
 	if err != nil {
 		return nil, err
 	}
 
-	// ref. "network/peer.writeMessages"
 	msgBytes := msg.Bytes()
 	msgLen := uint32(len(msgBytes))
 	msgLenBytes := [wrappers.IntLen]byte{}
@@ -948,25 +886,13 @@ func (s *server) PushQuery(ctx context.Context, req *rpcpb.PushQueryRequest) (*r
 		resp.Success = false
 	}
 	if req.GzipCompressed {
-		// gzip/flate2 in Rust/Go are compatible but outputs are different
-		rd := new(gzip.Reader)
-		// +2; 1 for type ID, 1 for compressible boolean
-		if err = rd.Reset(bytes.NewReader(expected[wrappers.IntLen+2:])); err != nil {
-			return nil, err
-		}
-		expectedDecompressed, err := io.ReadAll(rd)
+		expectedDecompressed, err := decompressZstd(expected[wrappers.IntLen+2:])
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to decompress expected: %w", err)
 		}
-
-		rd = new(gzip.Reader)
-		// +2; 1 for type ID, 1 for compressible boolean
-		if err = rd.Reset(bytes.NewReader(req.SerializedMsg[wrappers.IntLen+2:])); err != nil {
-			return nil, err
-		}
-		receivedDecompressed, err := io.ReadAll(rd)
+		receivedDecompressed, err := decompressZstd(req.SerializedMsg[wrappers.IntLen+2:])
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to decompress received: %w", err)
 		}
 		if !bytes.Equal(expectedDecompressed, receivedDecompressed) {
 			resp.Message = fmt.Sprintf("decompressed output expected [%x], got [%x]", expectedDecompressed, receivedDecompressed)
@@ -980,24 +906,20 @@ func (s *server) PushQuery(ctx context.Context, req *rpcpb.PushQueryRequest) (*r
 func (s *server) Put(ctx context.Context, req *rpcpb.PutRequest) (*rpcpb.PutResponse, error) {
 	zap.L().Debug("received Put request")
 
-	compressType := compression.TypeNone
-	if req.GzipCompressed {
-		compressType = compression.TypeGzip
-	}
-	mc, err := message.NewCreator(logging.NoLog{}, prometheus.NewRegistry(), "", compressType, 10*time.Second)
+	mc, err := createMessageCreator(req.GzipCompressed)
 	if err != nil {
 		return nil, err
 	}
 
-	chainID := [32]byte{}
+	chainID := ids.ID{}
 	copy(chainID[:], req.ChainId)
 
-	msg, err := mc.Put(ids.ID(chainID), req.RequestId, req.ContainerBytes, p2p.EngineType_ENGINE_TYPE_SNOWMAN)
+	// v1.14.0: removed engineType parameter
+	msg, err := mc.Put(chainID, req.RequestId, req.ContainerBytes)
 	if err != nil {
 		return nil, err
 	}
 
-	// ref. "network/peer.writeMessages"
 	msgBytes := msg.Bytes()
 	msgLen := uint32(len(msgBytes))
 	msgLenBytes := [wrappers.IntLen]byte{}
@@ -1013,25 +935,13 @@ func (s *server) Put(ctx context.Context, req *rpcpb.PutRequest) (*rpcpb.PutResp
 		resp.Success = false
 	}
 	if req.GzipCompressed {
-		// gzip/flate2 in Rust/Go are compatible but outputs are different
-		rd := new(gzip.Reader)
-		// +2; 1 for type ID, 1 for compressible boolean
-		if err = rd.Reset(bytes.NewReader(expected[wrappers.IntLen+2:])); err != nil {
-			return nil, err
-		}
-		expectedDecompressed, err := io.ReadAll(rd)
+		expectedDecompressed, err := decompressZstd(expected[wrappers.IntLen+2:])
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to decompress expected: %w", err)
 		}
-
-		rd = new(gzip.Reader)
-		// +2; 1 for type ID, 1 for compressible boolean
-		if err = rd.Reset(bytes.NewReader(req.SerializedMsg[wrappers.IntLen+2:])); err != nil {
-			return nil, err
-		}
-		receivedDecompressed, err := io.ReadAll(rd)
+		receivedDecompressed, err := decompressZstd(req.SerializedMsg[wrappers.IntLen+2:])
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to decompress received: %w", err)
 		}
 		if !bytes.Equal(expectedDecompressed, receivedDecompressed) {
 			resp.Message = fmt.Sprintf("decompressed output expected [%x], got [%x]", expectedDecompressed, receivedDecompressed)
@@ -1045,24 +955,19 @@ func (s *server) Put(ctx context.Context, req *rpcpb.PutRequest) (*rpcpb.PutResp
 func (s *server) StateSummaryFrontier(ctx context.Context, req *rpcpb.StateSummaryFrontierRequest) (*rpcpb.StateSummaryFrontierResponse, error) {
 	zap.L().Debug("received StateSummaryFrontier request")
 
-	compressType := compression.TypeNone
-	if req.GzipCompressed {
-		compressType = compression.TypeGzip
-	}
-	mc, err := message.NewCreator(logging.NoLog{}, prometheus.NewRegistry(), "", compressType, 10*time.Second)
+	mc, err := createMessageCreator(req.GzipCompressed)
 	if err != nil {
 		return nil, err
 	}
 
-	chainID := [32]byte{}
+	chainID := ids.ID{}
 	copy(chainID[:], req.ChainId)
 
-	msg, err := mc.StateSummaryFrontier(ids.ID(chainID), req.RequestId, req.Summary)
+	msg, err := mc.StateSummaryFrontier(chainID, req.RequestId, req.Summary)
 	if err != nil {
 		return nil, err
 	}
 
-	// ref. "network/peer.writeMessages"
 	msgBytes := msg.Bytes()
 	msgLen := uint32(len(msgBytes))
 	msgLenBytes := [wrappers.IntLen]byte{}
@@ -1078,25 +983,13 @@ func (s *server) StateSummaryFrontier(ctx context.Context, req *rpcpb.StateSumma
 		resp.Success = false
 	}
 	if req.GzipCompressed {
-		// gzip/flate2 in Rust/Go are compatible but outputs are different
-		rd := new(gzip.Reader)
-		// +2; 1 for type ID, 1 for compressible boolean
-		if err = rd.Reset(bytes.NewReader(expected[wrappers.IntLen+2:])); err != nil {
-			return nil, err
-		}
-		expectedDecompressed, err := io.ReadAll(rd)
+		expectedDecompressed, err := decompressZstd(expected[wrappers.IntLen+2:])
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to decompress expected: %w", err)
 		}
-
-		rd = new(gzip.Reader)
-		// +2; 1 for type ID, 1 for compressible boolean
-		if err = rd.Reset(bytes.NewReader(req.SerializedMsg[wrappers.IntLen+2:])); err != nil {
-			return nil, err
-		}
-		receivedDecompressed, err := io.ReadAll(rd)
+		receivedDecompressed, err := decompressZstd(req.SerializedMsg[wrappers.IntLen+2:])
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to decompress received: %w", err)
 		}
 		if !bytes.Equal(expectedDecompressed, receivedDecompressed) {
 			resp.Message = fmt.Sprintf("decompressed output expected [%x], got [%x]", expectedDecompressed, receivedDecompressed)
@@ -1110,47 +1003,13 @@ func (s *server) StateSummaryFrontier(ctx context.Context, req *rpcpb.StateSumma
 func (s *server) Version(ctx context.Context, req *rpcpb.VersionRequest) (*rpcpb.VersionResponse, error) {
 	zap.L().Debug("received Version request")
 
-	mc, err := message.NewCreator(logging.NoLog{}, prometheus.NewRegistry(), "", compression.TypeNone, 10*time.Second)
-	if err != nil {
-		return nil, err
-	}
-	ip := ips.IPPort{
-		IP:   net.IP(req.IpAddr),
-		Port: uint16(req.IpPort),
-	}
-	trackedSubnets := make([]ids.ID, 0, len(req.TrackedSubnets))
-	for _, b := range req.TrackedSubnets {
-		bb := [32]byte{}
-		copy(bb[:], b)
-		trackedSubnets = append(trackedSubnets, ids.ID(bb))
-	}
-	msg, err := mc.Version(
-		req.NetworkId,
-		req.MyTime,
-		ip,
-		req.MyVersion,
-		req.MyVersionTime,
-		req.Sig,
-		trackedSubnets,
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	// ref. "network/peer.writeMessages"
-	msgBytes := msg.Bytes()
-	msgLen := uint32(len(msgBytes))
-	msgLenBytes := [wrappers.IntLen]byte{}
-	binary.BigEndian.PutUint32(msgLenBytes[:], msgLen)
-	expected := append(msgLenBytes[:], msgBytes...)
-
+	// v1.14.0: The Version method has been REMOVED from the message.Creator interface
+	// Version negotiation now happens via Handshake message.
+	// This conformance test is no longer applicable for v1.14.0.
 	resp := &rpcpb.VersionResponse{
-		ExpectedSerializedMsg: expected,
-		Success:               true,
-	}
-	if !bytes.Equal(req.SerializedMsg, expected) {
-		resp.Message = fmt.Sprintf("expected 0x%x", expected)
-		resp.Success = false
+		ExpectedSerializedMsg: nil,
+		Success:               false,
+		Message:               "Version message method removed in v1.14.0 - use Handshake instead",
 	}
 
 	return resp, nil
