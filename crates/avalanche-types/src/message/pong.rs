@@ -12,22 +12,13 @@ pub struct Message {
 impl Default for Message {
     fn default() -> Self {
         Message {
-            msg: p2p::Pong {
-                uptime: 0,
-                subnet_uptimes: vec![],
-            },
+            msg: p2p::Pong {},
             gzip_compress: false,
         }
     }
 }
 
 impl Message {
-    #[must_use]
-    pub fn uptime_pct(mut self, uptime: u32) -> Self {
-        self.msg.uptime = uptime;
-        self
-    }
-
     #[must_use]
     pub fn gzip_compress(mut self, gzip_compress: bool) -> Self {
         self.gzip_compress = gzip_compress;
@@ -46,7 +37,7 @@ impl Message {
         let uncompressed_len = encoded.len();
         let compressed = message::compress::pack_gzip(&encoded)?;
         let msg = p2p::Message {
-            message: Some(p2p::message::Message::CompressedGzip(
+            message: Some(p2p::message::Message::CompressedZstd(
                 prost::bytes::Bytes::from(compressed),
             )),
         };
@@ -84,7 +75,7 @@ impl Message {
             }),
 
             // was compressed, so need decompress first
-            p2p::message::Message::CompressedGzip(msg) => {
+            p2p::message::Message::CompressedZstd(msg) => {
                 let decompressed = message::compress::unpack_gzip(msg.as_ref())?;
                 let decompressed_msg: p2p::Message =
                     ProstMessage::decode(prost::bytes::Bytes::from(decompressed)).map_err(|e| {
@@ -119,7 +110,7 @@ fn test_message() {
         .is_test(true)
         .try_init();
 
-    let msg1_with_no_compression = Message::default().uptime_pct(100);
+    let msg1_with_no_compression = Message::default();
 
     let data1 = msg1_with_no_compression.serialize().unwrap();
     let msg1_with_no_compression_deserialized = Message::deserialize(data1).unwrap();

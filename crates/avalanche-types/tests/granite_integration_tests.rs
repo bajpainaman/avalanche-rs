@@ -1103,7 +1103,7 @@ mod secp256r1_tests {
         let pubkey = key.to_public_key();
 
         let compressed = pubkey.to_compressed_bytes();
-        let restored = secp256r1::PublicKey::from_compressed_bytes(&compressed).unwrap();
+        let restored = secp256r1::PublicKey::from_sec1_bytes(&compressed).unwrap();
 
         assert_eq!(pubkey.to_compressed_bytes(), restored.to_compressed_bytes());
     }
@@ -1800,7 +1800,7 @@ mod warp_coverage_tests {
         let mut original = Message::new(
             UnsignedMessage::new(5, Id::from_slice(&[0xAB; 32]), vec![1, 2, 3, 4, 5]),
             vec![0b10101010],
-            vec![0x11; 48],
+            vec![0x11; 96], // BLS signatures are 96 bytes
         );
 
         let bytes = original.to_bytes().unwrap();

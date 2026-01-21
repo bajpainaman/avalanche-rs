@@ -13,13 +13,7 @@ pub struct Message {
 impl Default for Message {
     fn default() -> Self {
         Message {
-            msg: p2p::Ping {
-                uptime: 0,
-                subnet_uptimes: vec![p2p::SubnetUptime {
-                    subnet_id: Bytes::new(),
-                    uptime: 0,
-                }],
-            },
+            msg: p2p::Ping { uptime: 0 },
             gzip_compress: false,
         }
     }
@@ -44,7 +38,7 @@ impl Message {
         let uncompressed_len = encoded.len();
         let compressed = message::compress::pack_gzip(&encoded)?;
         let msg = p2p::Message {
-            message: Some(p2p::message::Message::CompressedGzip(Bytes::from(
+            message: Some(p2p::message::Message::CompressedZstd(Bytes::from(
                 compressed,
             ))),
         };
@@ -82,7 +76,7 @@ impl Message {
             }),
 
             // was compressed, so need decompress first
-            p2p::message::Message::CompressedGzip(msg) => {
+            p2p::message::Message::CompressedZstd(msg) => {
                 let decompressed = message::compress::unpack_gzip(msg.as_ref())?;
                 let decompressed_msg: p2p::Message =
                     ProstMessage::decode(Bytes::from(decompressed)).map_err(|e| {

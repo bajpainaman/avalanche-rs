@@ -276,6 +276,65 @@ where
         }))
     }
 
+    /// Creates a single HTTP handler for custom chain network calls.
+    /// Requests are routed based on the Avalanche-Api-Route header.
+    ///
+    /// ref. <https://github.com/ava-labs/avalanchego/blob/v1.14.0/vms/rpcchainvm/vm_server.go>
+    async fn new_http_handler(
+        &self,
+        _req: Request<Empty>,
+    ) -> std::result::Result<Response<vm::NewHttpHandlerResponse>, tonic::Status> {
+        log::debug!("new_http_handler called");
+
+        // Get the HTTP handler from underlying vm
+        let mut inner_vm = self.vm.write().await;
+        let handlers = inner_vm
+            .create_handlers()
+            .await
+            .map_err(|e| tonic::Status::unknown(format!("failed to create handlers: {e}")))?;
+
+        // Create a single gRPC server for the combined HTTP handler
+        // In v1.14.0+, avalanchego routes to different handlers using the header
+        if handlers.is_empty() {
+            return Ok(Response::new(vm::NewHttpHandlerResponse {
+                server_addr: String::new(),
+            }));
+        }
+
+        // Use the first handler (typically the main one)
+        let (_, http_handler) = handlers.into_iter().next().unwrap();
+        let server_addr = utils::new_socket_addr();
+        let server = grpc::Server::new(server_addr, self.stop_ch.subscribe());
+
+        server
+            .serve(pb::http::http_server::HttpServer::new(HttpServer::new(
+                http_handler.handler,
+            )))
+            .map_err(|e| tonic::Status::unknown(format!("failed to create http service: {e}")))?;
+
+        Ok(Response::new(vm::NewHttpHandlerResponse {
+            server_addr: server_addr.to_string(),
+        }))
+    }
+
+    /// Waits for the next event from the VM.
+    /// Returns when the VM has an event (e.g., BuildBlock, StateSyncFinished).
+    ///
+    /// ref. <https://github.com/ava-labs/avalanchego/blob/v1.14.0/vms/rpcchainvm/vm_server.go>
+    async fn wait_for_event(
+        &self,
+        _req: Request<Empty>,
+    ) -> std::result::Result<Response<vm::WaitForEventResponse>, tonic::Status> {
+        log::debug!("wait_for_event called");
+
+        // TODO: Implement event-driven model with internal event queue
+        // For now, return BuildBlock as the default event
+        // The VM should signal events through a channel that this method waits on
+        Ok(Response::new(vm::WaitForEventResponse {
+            message: vm::Message::BuildBlock as i32,
+        }))
+    }
+
     async fn build_block(
         &self,
         _req: Request<vm::BuildBlockRequest>,
@@ -317,7 +376,6 @@ where
         Ok(Response::new(vm::ParseBlockResponse {
             id: Bytes::from(block.id().await.to_vec()),
             parent_id: Bytes::from(block.parent().await.to_vec()),
-            status: block.status().await.to_i32(),
             height: block.height().await,
             timestamp: Some(timestamp_from_time(
                 &Utc.timestamp_opt(block.timestamp().await as i64, 0)
@@ -353,7 +411,6 @@ where
             Ok(block) => Ok(Response::new(vm::GetBlockResponse {
                 parent_id: Bytes::from(block.parent().await.to_vec()),
                 bytes: Bytes::from(block.bytes().await.to_vec()),
-                status: block.status().await.to_i32(),
                 height: block.height().await,
                 timestamp: Some(timestamp_from_time(
                     &Utc.timestamp_opt(block.timestamp().await as i64, 0)
@@ -369,7 +426,6 @@ where
                 Ok(Response::new(vm::GetBlockResponse {
                     parent_id: Bytes::new(),
                     bytes: Bytes::new(),
-                    status: 0,
                     height: 0,
                     timestamp: Some(timestamp_from_time(&Utc.timestamp_opt(0, 0).unwrap())),
                     err: error_to_error_code(&e.to_string()),
@@ -802,59 +858,7 @@ where
         Ok(Response::new(vm::GatherResponse { metric_families }))
     }
 
-    async fn cross_chain_app_request(
-        &self,
-        req: Request<vm::CrossChainAppRequestMsg>,
-    ) -> std::result::Result<Response<Empty>, tonic::Status> {
-        log::debug!("cross_chain_app_request called");
-        let msg = req.into_inner();
-        let chain_id = &ids::Id::from_slice(&msg.chain_id);
-
-        let ts = msg.deadline.as_ref().expect("timestamp");
-        let deadline = Utc.timestamp_opt(ts.seconds, ts.nanos as u32).unwrap();
-
-        let inner_vm = self.vm.read().await;
-        inner_vm
-            .cross_chain_app_request(chain_id, msg.request_id, deadline, &msg.request)
-            .await
-            .map_err(|e| tonic::Status::unknown(e.to_string()))?;
-
-        Ok(Response::new(Empty {}))
-    }
-
-    async fn cross_chain_app_request_failed(
-        &self,
-        req: Request<vm::CrossChainAppRequestFailedMsg>,
-    ) -> std::result::Result<Response<Empty>, tonic::Status> {
-        log::debug!("cross_chain_app_request_failed called");
-        let msg = req.into_inner();
-        let chain_id = &ids::Id::from_slice(&msg.chain_id);
-
-        let inner_vm = self.vm.read().await;
-        inner_vm
-            .cross_chain_app_request_failed(chain_id, msg.request_id)
-            .await
-            .map_err(|e| tonic::Status::unknown(e.to_string()))?;
-
-        Ok(Response::new(Empty {}))
-    }
-
-    async fn cross_chain_app_response(
-        &self,
-        req: Request<vm::CrossChainAppResponseMsg>,
-    ) -> std::result::Result<Response<Empty>, tonic::Status> {
-        log::debug!("cross_chain_app_response called");
-        let msg = req.into_inner();
-        let chain_id = &ids::Id::from_slice(&msg.chain_id);
-
-        let inner_vm = self.vm.read().await;
-        inner_vm
-            .cross_chain_app_response(chain_id, msg.request_id, &msg.response)
-            .await
-            .map_err(|e| tonic::Status::unknown(e.to_string()))?;
-
-        Ok(Response::new(Empty {}))
-    }
+    // NOTE: CrossChainApp* RPCs removed in avalanchego v1.14.0
 
     async fn state_sync_enabled(
         &self,
@@ -916,26 +920,7 @@ where
         Err(tonic::Status::unimplemented("state_summary_accept"))
     }
 
-    async fn verify_height_index(
-        &self,
-        _req: Request<Empty>,
-    ) -> std::result::Result<Response<vm::VerifyHeightIndexResponse>, tonic::Status> {
-        log::debug!("verify_height_index called");
-
-        let inner_vm = self.vm.read().await;
-
-        match inner_vm.verify_height_index().await {
-            Ok(_) => return Ok(Response::new(vm::VerifyHeightIndexResponse { err: 0 })),
-            Err(e) => {
-                if error_to_error_code(&e.to_string()) != 0 {
-                    return Ok(Response::new(vm::VerifyHeightIndexResponse {
-                        err: error_to_error_code(&e.to_string()),
-                    }));
-                }
-                return Err(tonic::Status::unknown(e.to_string()));
-            }
-        }
-    }
+    // NOTE: verify_height_index RPC removed in avalanchego v1.14.0
 
     async fn get_block_id_at_height(
         &self,

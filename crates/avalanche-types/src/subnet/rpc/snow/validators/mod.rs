@@ -33,6 +33,24 @@ pub struct GetValidatorOutput {
     pub weight: u64,
 }
 
+/// Warp validator output for BLS signature aggregation.
+/// Contains the BLS public key required for Warp message verification.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WarpValidatorOutput {
+    pub public_key: Key,
+    pub weight: u64,
+    pub node_ids: Vec<ids::node::Id>,
+}
+
+/// Warp validator set for a subnet at a specific height.
+/// Used for Warp message signature verification (ACP-181).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WarpValidatorSetOutput {
+    pub subnet_id: ids::Id,
+    pub total_weight: u64,
+    pub validators: Vec<WarpValidatorOutput>,
+}
+
 /// Allows the lookup of validator sets on specified subnets at the
 /// requested P-chain height.
 ///
@@ -57,4 +75,24 @@ pub trait State: Debug {
         height: u64,
         subnet_id: ids::Id,
     ) -> io::Result<BTreeMap<ids::node::Id, GetValidatorOutput>>;
+
+    /// Returns the canonical Warp validator sets for all subnets at the
+    /// requested P-chain height. Used for BLS signature aggregation in
+    /// Warp message verification (ACP-181).
+    async fn get_warp_validator_sets(&self, height: u64) -> io::Result<Vec<WarpValidatorSetOutput>>;
+
+    /// Returns the canonical Warp validator set for a specific subnet at the
+    /// requested P-chain height. Used for Warp message verification.
+    async fn get_warp_validator_set(
+        &self,
+        height: u64,
+        subnet_id: ids::Id,
+    ) -> io::Result<(u64, Vec<WarpValidatorOutput>)>;
+
+    /// Returns the current validator set for the provided subnet along with
+    /// the current P-chain height.
+    async fn get_current_validator_set(
+        &self,
+        subnet_id: ids::Id,
+    ) -> io::Result<(u64, BTreeMap<ids::node::Id, GetValidatorOutput>)>;
 }
