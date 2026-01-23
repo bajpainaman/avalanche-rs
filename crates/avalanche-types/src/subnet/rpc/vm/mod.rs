@@ -1,6 +1,9 @@
 //! RPC Chain VM implementation.
 pub mod server;
 
+// Re-export common types for convenience
+pub use server::{Event, EventNotifier, Server};
+
 use std::{
     env,
     io::{Error, ErrorKind, Result},

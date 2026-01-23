@@ -9,6 +9,7 @@ fn main() {
                 "../avalanchego-conformance/rpcpb/message.proto",
                 "../avalanchego-conformance/rpcpb/packer.proto",
                 "../avalanchego-conformance/rpcpb/ping.proto",
+                "../avalanchego-conformance/rpcpb/l1tx.proto",
             ],
             &["../avalanchego-conformance/rpcpb"],
         )

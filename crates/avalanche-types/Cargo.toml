@@ -29,6 +29,7 @@ hmac = "0.12.1"
 hyper = { version = "0.14.26"}
 k256 = { version = "0.13.1", features = ["ecdsa"] } # https://github.com/RustCrypto/elliptic-curves/tree/master/k256
 lazy_static = "1.4.0"
+p256 = { version = "0.13.2", features = ["ecdsa"], optional = true } # https://github.com/RustCrypto/elliptic-curves/tree/master/p256 (Granite - ACP-204)
 log = "0.4.20"
 prefix-manager = "0.0.2"
 primitive-types = { version = "0.12.1", features = ["impl-serde"] } # https://crates.io/crates/primitive-types
@@ -138,10 +139,14 @@ jsonrpc_client = ["ethers-providers", "reqwest", "tokio"]
 kms_aws = ["aws-manager", "aws-sdk-kms", "ethers-signers", "tokio"]
 libsecp256k1 = ["secp256k1"]
 mnemonic = ["bip32", "rand_core"]
+secp256r1 = ["p256"]  # Granite - ACP-204: P-256 curve for biometric authentication
 subnet_evm = []
 wallet = ["reqwest", "tokio"]
 wallet_evm = ["ethers", "ethers-providers", "ethers-signers", "tokio", "jsonrpc_client", "reqwest"]
 xsvm = []
+
+# E2E tests against live Avalanche networks
+e2e = ["jsonrpc_client"]
 
 proto = [
     "prost",

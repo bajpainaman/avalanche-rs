@@ -11,7 +11,10 @@ use crate::{
     ids,
     proto::{
         google::protobuf::Empty,
-        validatorstate::{validator_state_client, GetSubnetIdRequest, GetValidatorSetRequest},
+        validatorstate::{
+            validator_state_client, GetCurrentValidatorSetRequest, GetSubnetIdRequest,
+            GetValidatorSetRequest, GetWarpValidatorSetRequest, GetWarpValidatorSetsRequest,
+        },
     },
 };
 
@@ -103,5 +106,126 @@ impl super::State for ValidatorStateClient {
         }
 
         Ok(validators)
+    }
+
+    async fn get_warp_validator_sets(&self, height: u64) -> Result<Vec<WarpValidatorSetOutput>> {
+        let mut client = self.inner.clone();
+        let resp = client
+            .get_warp_validator_sets(GetWarpValidatorSetsRequest { height })
+            .await
+            .map_err(|e| {
+                Error::new(
+                    ErrorKind::Other,
+                    format!("get_warp_validator_sets failed: {e}"),
+                )
+            })?
+            .into_inner();
+
+        let mut result = Vec::with_capacity(resp.validator_sets.len());
+        for vs in resp.validator_sets {
+            let validators = vs
+                .validators
+                .into_iter()
+                .map(|v| {
+                    Ok(WarpValidatorOutput {
+                        public_key: Key::from_bytes(&v.public_key)?,
+                        weight: v.weight,
+                        node_ids: v
+                            .node_ids
+                            .iter()
+                            .map(|id| ids::node::Id::from_slice(id))
+                            .collect(),
+                    })
+                })
+                .collect::<Result<Vec<_>>>()?;
+
+            result.push(WarpValidatorSetOutput {
+                subnet_id: ids::Id::from_slice(&vs.subnet_id),
+                total_weight: vs.total_weight,
+                validators,
+            });
+        }
+
+        Ok(result)
+    }
+
+    async fn get_warp_validator_set(
+        &self,
+        height: u64,
+        subnet_id: ids::Id,
+    ) -> Result<(u64, Vec<WarpValidatorOutput>)> {
+        let mut client = self.inner.clone();
+        let resp = client
+            .get_warp_validator_set(GetWarpValidatorSetRequest {
+                height,
+                subnet_id: Bytes::from(subnet_id.to_vec()),
+            })
+            .await
+            .map_err(|e| {
+                Error::new(
+                    ErrorKind::Other,
+                    format!("get_warp_validator_set failed: {e}"),
+                )
+            })?
+            .into_inner();
+
+        let validators = resp
+            .validators
+            .into_iter()
+            .map(|v| {
+                Ok(WarpValidatorOutput {
+                    public_key: Key::from_bytes(&v.public_key)?,
+                    weight: v.weight,
+                    node_ids: v
+                        .node_ids
+                        .iter()
+                        .map(|id| ids::node::Id::from_slice(id))
+                        .collect(),
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        Ok((resp.total_weight, validators))
+    }
+
+    async fn get_current_validator_set(
+        &self,
+        subnet_id: ids::Id,
+    ) -> Result<(u64, BTreeMap<ids::node::Id, GetValidatorOutput>)> {
+        let mut client = self.inner.clone();
+        let resp = client
+            .get_current_validator_set(GetCurrentValidatorSetRequest {
+                subnet_id: Bytes::from(subnet_id.to_vec()),
+            })
+            .await
+            .map_err(|e| {
+                Error::new(
+                    ErrorKind::Other,
+                    format!("get_current_validator_set failed: {e}"),
+                )
+            })?
+            .into_inner();
+
+        let mut validators: BTreeMap<ids::node::Id, GetValidatorOutput> = BTreeMap::new();
+
+        for validator in resp.validators.iter() {
+            let node_id = ids::node::Id::from_slice(&validator.node_id);
+
+            let public_key = if !validator.public_key.is_empty() {
+                Some(Key::from_bytes(&validator.public_key)?)
+            } else {
+                None
+            };
+            validators.insert(
+                node_id,
+                GetValidatorOutput {
+                    node_id,
+                    public_key,
+                    weight: validator.weight,
+                },
+            );
+        }
+
+        Ok((resp.current_height, validators))
     }
 }

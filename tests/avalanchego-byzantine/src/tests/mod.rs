@@ -16,7 +16,11 @@ use avalanche_types::{
 };
 use network::peer::outbound;
 
+/// Integration test for byzantine fault tolerance.
+/// Requires running network-runner with NETWORK_RUNNER_GRPC_ENDPOINT set.
+/// Run with: cargo test -p avalanchego-byzantine -- --ignored
 #[tokio::test]
+#[ignore]
 async fn byzantine() {
     let _ = env_logger::builder()
         .filter_level(log::LevelFilter::Info)

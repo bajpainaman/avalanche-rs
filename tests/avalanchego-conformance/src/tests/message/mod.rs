@@ -10,4 +10,4 @@ mod ping_pong;
 mod pull_query;
 mod push_query;
 mod state_summary_frontier;
-mod version;
+// mod version; // Removed: Version message was replaced with Handshake in v1.12.0+

@@ -57,8 +57,10 @@ lazy_static! {
         m.insert("secp256k1fx.OutputOwners".to_string(), 11);
 
         m.insert("platformvm.AddValidatorTx".to_string(), 12);
+        // NOTE: AddSubnetValidatorTx is DISABLED on L1s (converted subnets) since Etna (v1.12.0)
         m.insert("platformvm.AddSubnetValidatorTx".to_string(), 13);
         m.insert("platformvm.AddDelegatorTx".to_string(), 14);
+        // NOTE: CreateChainTx is DISABLED on L1s (converted subnets) since Etna (v1.12.0)
         m.insert("platformvm.CreateChainTx".to_string(), 15);
         m.insert("platformvm.CreateSubnetTx".to_string(), 16);
         m.insert("platformvm.ImportTx".to_string(), 17);
@@ -70,6 +72,7 @@ lazy_static! {
 
         // Banff additions
         m.insert("platformvm.RemoveSubnetValidatorTx".to_string(), 23);
+        // NOTE: TransformSubnetTx is DISABLED since Etna (v1.12.0) - use ConvertSubnetToL1Tx instead
         m.insert("platformvm.TransformSubnetTx".to_string(), 24);
         m.insert("platformvm.AddPermissionlessValidatorTx".to_string(), 25);
         m.insert("platformvm.AddPermissionlessDelegatorTx".to_string(), 26);
@@ -77,6 +80,28 @@ lazy_static! {
         m.insert("signer.Empty".to_string(), 27);
         m.insert("signer.ProofOfPossession".to_string(), 28);
 
+        // Durango additions
+        m.insert("platformvm.TransferSubnetOwnershipTx".to_string(), 29);
+        m.insert("platformvm.BaseTx".to_string(), 30);
+
+        // Etna additions (ACP-77: L1 validator management)
+        m.insert("platformvm.ConvertSubnetToL1Tx".to_string(), 31);
+        m.insert("platformvm.RegisterL1ValidatorTx".to_string(), 32);
+        m.insert("platformvm.SetL1ValidatorWeightTx".to_string(), 33);
+        m.insert("platformvm.IncreaseL1ValidatorBalanceTx".to_string(), 34);
+        m.insert("platformvm.DisableL1ValidatorTx".to_string(), 35);
+
+        m
+    };
+
+    /// Warp message payload type IDs (Etna - ACP-77)
+    /// ref. <https://github.com/ava-labs/avalanchego/blob/v1.14.0/vms/platformvm/warp/payload/codec.go>
+    pub static ref WARP_PAYLOAD_TYPES: HashMap<String, usize> = {
+        let mut m = HashMap::new();
+        m.insert("warp.SubnetToL1ConversionMessage".to_string(), 0);
+        m.insert("warp.RegisterL1ValidatorMessage".to_string(), 1);
+        m.insert("warp.L1ValidatorRegistrationMessage".to_string(), 2);
+        m.insert("warp.L1ValidatorWeightMessage".to_string(), 3);
         m
     };
 }

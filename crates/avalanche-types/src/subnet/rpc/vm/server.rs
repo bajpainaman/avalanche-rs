@@ -41,6 +41,13 @@ use prost::bytes::Bytes;
 use tokio::sync::{broadcast, mpsc, RwLock};
 use tonic::{Request, Response};
 
+/// Event type for VM to signal to the consensus engine.
+/// Re-exported from proto for convenience.
+pub type Event = vm::Message;
+
+/// Event notifier type that VMs can use to signal events.
+pub type EventNotifier = mpsc::Sender<Event>;
+
 pub struct Server<V> {
     /// Underlying Vm implementation.
     pub vm: Arc<RwLock<V>>,
@@ -52,17 +59,40 @@ pub struct Server<V> {
 
     /// Stop channel broadcast producer.
     pub stop_ch: broadcast::Sender<()>,
+
+    /// Event channel receiver - receives events from the VM.
+    /// Used by wait_for_event to block until an event is ready.
+    event_rx: Arc<RwLock<mpsc::Receiver<Event>>>,
+
+    /// Event channel sender - passed to VM to signal events.
+    /// Clone this to get a notifier that can signal BuildBlock or StateSyncFinished.
+    event_tx: mpsc::Sender<Event>,
 }
 
 impl<V: ChainVm> Server<V> {
+    /// Default capacity for the event channel.
+    /// Small buffer since events are consumed immediately by wait_for_event.
+    const EVENT_CHANNEL_CAPACITY: usize = 16;
+
     pub fn new(vm: V, stop_ch: broadcast::Sender<()>) -> Self {
+        let (event_tx, event_rx) = mpsc::channel(Self::EVENT_CHANNEL_CAPACITY);
+
         Self {
             vm: Arc::new(RwLock::new(vm)),
             #[cfg(feature = "subnet_metrics")]
             #[cfg_attr(docsrs, doc(cfg(feature = "subnet_metrics")))]
             process_metrics: Arc::new(RwLock::new(prometheus::default_registry().to_owned())),
             stop_ch,
+            event_rx: Arc::new(RwLock::new(event_rx)),
+            event_tx,
         }
+    }
+
+    /// Returns an event notifier that can be used by the VM to signal events.
+    /// The VM should call `notifier.send(Event::BuildBlock)` when it has
+    /// pending transactions ready to build into a block.
+    pub fn event_notifier(&self) -> EventNotifier {
+        self.event_tx.clone()
     }
 
     /// Attempts to get the ancestors of a block from the underlying Vm.
@@ -276,6 +306,89 @@ where
         }))
     }
 
+    /// Creates a single HTTP handler for custom chain network calls.
+    /// Requests are routed based on the Avalanche-Api-Route header.
+    ///
+    /// ref. <https://github.com/ava-labs/avalanchego/blob/v1.14.0/vms/rpcchainvm/vm_server.go>
+    async fn new_http_handler(
+        &self,
+        _req: Request<Empty>,
+    ) -> std::result::Result<Response<vm::NewHttpHandlerResponse>, tonic::Status> {
+        log::debug!("new_http_handler called");
+
+        // Get the HTTP handler from underlying vm
+        let mut inner_vm = self.vm.write().await;
+        let handlers = inner_vm
+            .create_handlers()
+            .await
+            .map_err(|e| tonic::Status::unknown(format!("failed to create handlers: {e}")))?;
+
+        // Create a single gRPC server for the combined HTTP handler
+        // In v1.14.0+, avalanchego routes to different handlers using the header
+        if handlers.is_empty() {
+            return Ok(Response::new(vm::NewHttpHandlerResponse {
+                server_addr: String::new(),
+            }));
+        }
+
+        // Use the first handler (typically the main one)
+        let (_, http_handler) = handlers.into_iter().next().unwrap();
+        let server_addr = utils::new_socket_addr();
+        let server = grpc::Server::new(server_addr, self.stop_ch.subscribe());
+
+        server
+            .serve(pb::http::http_server::HttpServer::new(HttpServer::new(
+                http_handler.handler,
+            )))
+            .map_err(|e| tonic::Status::unknown(format!("failed to create http service: {e}")))?;
+
+        Ok(Response::new(vm::NewHttpHandlerResponse {
+            server_addr: server_addr.to_string(),
+        }))
+    }
+
+    /// Waits for the next event from the VM.
+    /// Returns when the VM has an event (e.g., BuildBlock, StateSyncFinished).
+    ///
+    /// This method blocks until the VM signals an event via the event notifier.
+    /// Use `server.event_notifier()` to get a sender that can signal events.
+    ///
+    /// ref. <https://github.com/ava-labs/avalanchego/blob/v1.14.0/vms/rpcchainvm/vm_server.go>
+    async fn wait_for_event(
+        &self,
+        _req: Request<Empty>,
+    ) -> std::result::Result<Response<vm::WaitForEventResponse>, tonic::Status> {
+        log::debug!("wait_for_event called, waiting for VM event...");
+
+        // Wait for the next event from the VM
+        let mut event_rx = self.event_rx.write().await;
+
+        // Also listen for stop signal to allow graceful shutdown
+        let mut stop_rx = self.stop_ch.subscribe();
+
+        tokio::select! {
+            event = event_rx.recv() => {
+                match event {
+                    Some(msg) => {
+                        log::debug!("wait_for_event received: {:?}", msg);
+                        Ok(Response::new(vm::WaitForEventResponse {
+                            message: msg as i32,
+                        }))
+                    }
+                    None => {
+                        // Channel closed, VM is shutting down
+                        log::warn!("wait_for_event: event channel closed");
+                        Err(tonic::Status::unavailable("VM event channel closed"))
+                    }
+                }
+            }
+            _ = stop_rx.recv() => {
+                log::debug!("wait_for_event: received stop signal");
+                Err(tonic::Status::cancelled("VM is shutting down"))
+            }
+        }
+    }
+
     async fn build_block(
         &self,
         _req: Request<vm::BuildBlockRequest>,
@@ -317,7 +430,6 @@ where
         Ok(Response::new(vm::ParseBlockResponse {
             id: Bytes::from(block.id().await.to_vec()),
             parent_id: Bytes::from(block.parent().await.to_vec()),
-            status: block.status().await.to_i32(),
             height: block.height().await,
             timestamp: Some(timestamp_from_time(
                 &Utc.timestamp_opt(block.timestamp().await as i64, 0)
@@ -353,7 +465,6 @@ where
             Ok(block) => Ok(Response::new(vm::GetBlockResponse {
                 parent_id: Bytes::from(block.parent().await.to_vec()),
                 bytes: Bytes::from(block.bytes().await.to_vec()),
-                status: block.status().await.to_i32(),
                 height: block.height().await,
                 timestamp: Some(timestamp_from_time(
                     &Utc.timestamp_opt(block.timestamp().await as i64, 0)
@@ -369,7 +480,6 @@ where
                 Ok(Response::new(vm::GetBlockResponse {
                     parent_id: Bytes::new(),
                     bytes: Bytes::new(),
-                    status: 0,
                     height: 0,
                     timestamp: Some(timestamp_from_time(&Utc.timestamp_opt(0, 0).unwrap())),
                     err: error_to_error_code(&e.to_string()),
@@ -802,59 +912,7 @@ where
         Ok(Response::new(vm::GatherResponse { metric_families }))
     }
 
-    async fn cross_chain_app_request(
-        &self,
-        req: Request<vm::CrossChainAppRequestMsg>,
-    ) -> std::result::Result<Response<Empty>, tonic::Status> {
-        log::debug!("cross_chain_app_request called");
-        let msg = req.into_inner();
-        let chain_id = &ids::Id::from_slice(&msg.chain_id);
-
-        let ts = msg.deadline.as_ref().expect("timestamp");
-        let deadline = Utc.timestamp_opt(ts.seconds, ts.nanos as u32).unwrap();
-
-        let inner_vm = self.vm.read().await;
-        inner_vm
-            .cross_chain_app_request(chain_id, msg.request_id, deadline, &msg.request)
-            .await
-            .map_err(|e| tonic::Status::unknown(e.to_string()))?;
-
-        Ok(Response::new(Empty {}))
-    }
-
-    async fn cross_chain_app_request_failed(
-        &self,
-        req: Request<vm::CrossChainAppRequestFailedMsg>,
-    ) -> std::result::Result<Response<Empty>, tonic::Status> {
-        log::debug!("cross_chain_app_request_failed called");
-        let msg = req.into_inner();
-        let chain_id = &ids::Id::from_slice(&msg.chain_id);
-
-        let inner_vm = self.vm.read().await;
-        inner_vm
-            .cross_chain_app_request_failed(chain_id, msg.request_id)
-            .await
-            .map_err(|e| tonic::Status::unknown(e.to_string()))?;
-
-        Ok(Response::new(Empty {}))
-    }
-
-    async fn cross_chain_app_response(
-        &self,
-        req: Request<vm::CrossChainAppResponseMsg>,
-    ) -> std::result::Result<Response<Empty>, tonic::Status> {
-        log::debug!("cross_chain_app_response called");
-        let msg = req.into_inner();
-        let chain_id = &ids::Id::from_slice(&msg.chain_id);
-
-        let inner_vm = self.vm.read().await;
-        inner_vm
-            .cross_chain_app_response(chain_id, msg.request_id, &msg.response)
-            .await
-            .map_err(|e| tonic::Status::unknown(e.to_string()))?;
-
-        Ok(Response::new(Empty {}))
-    }
+    // NOTE: CrossChainApp* RPCs removed in avalanchego v1.14.0
 
     async fn state_sync_enabled(
         &self,
@@ -916,26 +974,7 @@ where
         Err(tonic::Status::unimplemented("state_summary_accept"))
     }
 
-    async fn verify_height_index(
-        &self,
-        _req: Request<Empty>,
-    ) -> std::result::Result<Response<vm::VerifyHeightIndexResponse>, tonic::Status> {
-        log::debug!("verify_height_index called");
-
-        let inner_vm = self.vm.read().await;
-
-        match inner_vm.verify_height_index().await {
-            Ok(_) => return Ok(Response::new(vm::VerifyHeightIndexResponse { err: 0 })),
-            Err(e) => {
-                if error_to_error_code(&e.to_string()) != 0 {
-                    return Ok(Response::new(vm::VerifyHeightIndexResponse {
-                        err: error_to_error_code(&e.to_string()),
-                    }));
-                }
-                return Err(tonic::Status::unknown(e.to_string()));
-            }
-        }
-    }
+    // NOTE: verify_height_index RPC removed in avalanchego v1.14.0
 
     async fn get_block_id_at_height(
         &self,

@@ -5,8 +5,8 @@
 
 # protocol version is the version of the gRPC proto definitions
 # as defined by the avalanchego rpcchainvm.
-# ref. https://github.com/ava-labs/avalanchego/blob/v1.11.0/version/constants.go
-PROTOCOL_VERSION='33'
+# ref. https://github.com/ava-labs/avalanchego/blob/v1.14.0/version/constants.go
+PROTOCOL_VERSION='44'
 
 if ! [[ "$0" =~ scripts/protobuf_codegen.sh ]]; then
   echo "must be run from repository root"

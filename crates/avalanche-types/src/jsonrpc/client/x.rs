@@ -80,8 +80,80 @@ pub async fn issue_tx(http_rpc: &str, tx: &str) -> Result<avm::IssueTxResponse> 
     })
 }
 
+/// e.g., "avm.getTx" on "http://\[ADDR\]:9650" and "/ext/bc/X" path.
+/// ref. <https://docs.avax.network/apis/avalanchego/apis/x-chain/#avmgettx>
+///
+/// Returns the transaction bytes and status. This replaces the deprecated `avm.getTxStatus` API.
+pub async fn get_tx(http_rpc: &str, tx_id: &str) -> Result<avm::GetTxResponse> {
+    let (scheme, host, port, _, _) =
+        utils::urls::extract_scheme_host_port_path_chain_alias(http_rpc).map_err(|e| {
+            Error::Other {
+                message: format!("failed extract_scheme_host_port_path_chain_alias '{}'", e),
+                retryable: false,
+            }
+        })?;
+    let url = url::try_create_url(url::Path::X, scheme.as_deref(), host.as_str(), port)?;
+    log::info!("getting tx via {url}");
+
+    let data = avm::GetTxRequest {
+        method: String::from("avm.getTx"),
+        params: Some(avm::GetTxParams {
+            tx_id: String::from(tx_id),
+            encoding: String::from("hex"),
+        }),
+        ..Default::default()
+    };
+    let d = data.encode_json().map_err(|e| Error::Other {
+        message: format!("failed encode_json '{}'", e),
+        retryable: false,
+    })?;
+
+    let req_cli_builder = ClientBuilder::new()
+        .user_agent(env!("CARGO_PKG_NAME"))
+        .danger_accept_invalid_certs(true)
+        .timeout(Duration::from_secs(15))
+        .connection_verbose(true)
+        .build()
+        .map_err(|e| {
+            Error::Other {
+                message: format!("failed reqwest::ClientBuilder.build '{}'", e),
+                retryable: false,
+            }
+        })?;
+    let resp = req_cli_builder
+        .post(url.to_string())
+        .header(CONTENT_TYPE, "application/json")
+        .body(d)
+        .send()
+        .await
+        .map_err(|e| Error::API {
+            message: format!("failed reqwest::Client.send '{}'", e),
+            retryable: false,
+        })?;
+    let out = resp.bytes().await.map_err(|e| {
+        Error::Other {
+            message: format!("failed reqwest response bytes '{}'", e),
+            retryable: false,
+        }
+    })?;
+    let out: Vec<u8> = out.into();
+
+    serde_json::from_slice(&out).map_err(|e| Error::Other {
+        message: format!("failed serde_json::from_slice '{}'", e),
+        retryable: false,
+    })
+}
+
 /// e.g., "avm.getTxStatus" on "http://\[ADDR\]:9650" and "/ext/bc/X" path.
 /// ref. <https://docs.avax.network/apis/avalanchego/apis/x-chain/#avmgettxstatus>
+///
+/// **DEPRECATED since avalanchego v1.14.0 (Granite)**: Use `avm.getTx` instead.
+/// This API will be removed in a future version.
+#[deprecated(
+    since = "0.2.0",
+    note = "Use avm.getTx instead. Deprecated in avalanchego v1.14.0"
+)]
+#[allow(deprecated)]
 pub async fn get_tx_status(http_rpc: &str, tx_id: &str) -> Result<avm::GetTxStatusResponse> {
     let (scheme, host, port, _, _) =
         utils::urls::extract_scheme_host_port_path_chain_alias(http_rpc).map_err(|e| {

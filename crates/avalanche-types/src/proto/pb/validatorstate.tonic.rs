@@ -163,6 +163,66 @@ pub mod validator_state_client {
                 .insert(GrpcMethod::new("validatorstate.ValidatorState", "GetSubnetID"));
             self.inner.unary(req, path, codec).await
         }
+        pub async fn get_warp_validator_sets(
+            &mut self,
+            request: impl tonic::IntoRequest<super::GetWarpValidatorSetsRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetWarpValidatorSetsResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/validatorstate.ValidatorState/GetWarpValidatorSets",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "validatorstate.ValidatorState",
+                        "GetWarpValidatorSets",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
+        }
+        pub async fn get_warp_validator_set(
+            &mut self,
+            request: impl tonic::IntoRequest<super::GetWarpValidatorSetRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetWarpValidatorSetResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/validatorstate.ValidatorState/GetWarpValidatorSet",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "validatorstate.ValidatorState",
+                        "GetWarpValidatorSet",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
+        }
         pub async fn get_validator_set(
             &mut self,
             request: impl tonic::IntoRequest<super::GetValidatorSetRequest>,
@@ -187,6 +247,36 @@ pub mod validator_state_client {
             req.extensions_mut()
                 .insert(
                     GrpcMethod::new("validatorstate.ValidatorState", "GetValidatorSet"),
+                );
+            self.inner.unary(req, path, codec).await
+        }
+        pub async fn get_current_validator_set(
+            &mut self,
+            request: impl tonic::IntoRequest<super::GetCurrentValidatorSetRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetCurrentValidatorSetResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/validatorstate.ValidatorState/GetCurrentValidatorSet",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "validatorstate.ValidatorState",
+                        "GetCurrentValidatorSet",
+                    ),
                 );
             self.inner.unary(req, path, codec).await
         }
@@ -220,11 +310,32 @@ pub mod validator_state_server {
             tonic::Response<super::GetSubnetIdResponse>,
             tonic::Status,
         >;
+        async fn get_warp_validator_sets(
+            &self,
+            request: tonic::Request<super::GetWarpValidatorSetsRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetWarpValidatorSetsResponse>,
+            tonic::Status,
+        >;
+        async fn get_warp_validator_set(
+            &self,
+            request: tonic::Request<super::GetWarpValidatorSetRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetWarpValidatorSetResponse>,
+            tonic::Status,
+        >;
         async fn get_validator_set(
             &self,
             request: tonic::Request<super::GetValidatorSetRequest>,
         ) -> std::result::Result<
             tonic::Response<super::GetValidatorSetResponse>,
+            tonic::Status,
+        >;
+        async fn get_current_validator_set(
+            &self,
+            request: tonic::Request<super::GetCurrentValidatorSetRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetCurrentValidatorSetResponse>,
             tonic::Status,
         >;
     }
@@ -449,6 +560,98 @@ pub mod validator_state_server {
                     };
                     Box::pin(fut)
                 }
+                "/validatorstate.ValidatorState/GetWarpValidatorSets" => {
+                    #[allow(non_camel_case_types)]
+                    struct GetWarpValidatorSetsSvc<T: ValidatorState>(pub Arc<T>);
+                    impl<
+                        T: ValidatorState,
+                    > tonic::server::UnaryService<super::GetWarpValidatorSetsRequest>
+                    for GetWarpValidatorSetsSvc<T> {
+                        type Response = super::GetWarpValidatorSetsResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::GetWarpValidatorSetsRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                (*inner).get_warp_validator_sets(request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = GetWarpValidatorSetsSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/validatorstate.ValidatorState/GetWarpValidatorSet" => {
+                    #[allow(non_camel_case_types)]
+                    struct GetWarpValidatorSetSvc<T: ValidatorState>(pub Arc<T>);
+                    impl<
+                        T: ValidatorState,
+                    > tonic::server::UnaryService<super::GetWarpValidatorSetRequest>
+                    for GetWarpValidatorSetSvc<T> {
+                        type Response = super::GetWarpValidatorSetResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::GetWarpValidatorSetRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                (*inner).get_warp_validator_set(request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = GetWarpValidatorSetSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
                 "/validatorstate.ValidatorState/GetValidatorSet" => {
                     #[allow(non_camel_case_types)]
                     struct GetValidatorSetSvc<T: ValidatorState>(pub Arc<T>);
@@ -480,6 +683,52 @@ pub mod validator_state_server {
                     let fut = async move {
                         let inner = inner.0;
                         let method = GetValidatorSetSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/validatorstate.ValidatorState/GetCurrentValidatorSet" => {
+                    #[allow(non_camel_case_types)]
+                    struct GetCurrentValidatorSetSvc<T: ValidatorState>(pub Arc<T>);
+                    impl<
+                        T: ValidatorState,
+                    > tonic::server::UnaryService<super::GetCurrentValidatorSetRequest>
+                    for GetCurrentValidatorSetSvc<T> {
+                        type Response = super::GetCurrentValidatorSetResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::GetCurrentValidatorSetRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                (*inner).get_current_validator_set(request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = GetCurrentValidatorSetSvc(inner);
                         let codec = tonic::codec::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(

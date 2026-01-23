@@ -17,7 +17,6 @@ impl Default for Message {
                 request_id: 0,
                 deadline: 0,
                 container_id: prost::bytes::Bytes::new(),
-                engine_type: p2p::EngineType::Unspecified.into(),
                 requested_height: 0,
             },
             gzip_compress: false,
@@ -68,7 +67,7 @@ impl Message {
         let uncompressed_len = encoded.len();
         let compressed = message::compress::pack_gzip(&encoded)?;
         let msg = p2p::Message {
-            message: Some(p2p::message::Message::CompressedGzip(
+            message: Some(p2p::message::Message::CompressedZstd(
                 prost::bytes::Bytes::from(compressed),
             )),
         };
@@ -106,7 +105,7 @@ impl Message {
             }),
 
             // was compressed, so need decompress first
-            p2p::message::Message::CompressedGzip(msg) => {
+            p2p::message::Message::CompressedZstd(msg) => {
                 let decompressed = message::compress::unpack_gzip(msg.as_ref())?;
                 let decompressed_msg: p2p::Message =
                     ProstMessage::decode(prost::bytes::Bytes::from(decompressed)).map_err(|e| {

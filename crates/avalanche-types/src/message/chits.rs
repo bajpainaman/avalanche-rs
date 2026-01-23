@@ -19,6 +19,7 @@ impl Default for Message {
                 preferred_id: Bytes::new(),
                 accepted_id: Bytes::new(),
                 preferred_id_at_height: Bytes::new(),
+                accepted_height: 0,
             },
             gzip_compress: false,
         }
@@ -39,8 +40,26 @@ impl Message {
     }
 
     #[must_use]
-    pub fn container_id(mut self, id: ids::Id) -> Self {
+    pub fn preferred_id(mut self, id: ids::Id) -> Self {
         self.msg.preferred_id = Bytes::from(id.to_vec());
+        self
+    }
+
+    #[must_use]
+    pub fn preferred_id_at_height(mut self, id: ids::Id) -> Self {
+        self.msg.preferred_id_at_height = Bytes::from(id.to_vec());
+        self
+    }
+
+    #[must_use]
+    pub fn accepted_id(mut self, id: ids::Id) -> Self {
+        self.msg.accepted_id = Bytes::from(id.to_vec());
+        self
+    }
+
+    #[must_use]
+    pub fn accepted_height(mut self, height: u64) -> Self {
+        self.msg.accepted_height = height;
         self
     }
 
@@ -62,7 +81,7 @@ impl Message {
         let uncompressed_len = encoded.len();
         let compressed = message::compress::pack_gzip(&encoded)?;
         let msg = p2p::Message {
-            message: Some(p2p::message::Message::CompressedGzip(Bytes::from(
+            message: Some(p2p::message::Message::CompressedZstd(Bytes::from(
                 compressed,
             ))),
         };
@@ -100,7 +119,7 @@ impl Message {
             }),
 
             // was compressed, so need decompress first
-            p2p::message::Message::CompressedGzip(msg) => {
+            p2p::message::Message::CompressedZstd(msg) => {
                 let decompressed = message::compress::unpack_gzip(msg.as_ref())?;
                 let decompressed_msg: p2p::Message =
                     ProstMessage::decode(Bytes::from(decompressed)).map_err(|e| {
@@ -135,14 +154,22 @@ fn test_message() {
         .is_test(true)
         .try_init();
 
+    // v1.14.0: Chits has preferred_id, preferred_id_at_height, accepted_id, accepted_height
     let msg1_with_no_compression = Message::default()
         .chain_id(ids::Id::from_slice(
             &random_manager::secure_bytes(32).unwrap(),
         ))
         .request_id(random_manager::u32())
-        .container_id(ids::Id::from_slice(
+        .preferred_id(ids::Id::from_slice(
             &random_manager::secure_bytes(32).unwrap(),
-        ));
+        ))
+        .preferred_id_at_height(ids::Id::from_slice(
+            &random_manager::secure_bytes(32).unwrap(),
+        ))
+        .accepted_id(ids::Id::from_slice(
+            &random_manager::secure_bytes(32).unwrap(),
+        ))
+        .accepted_height(random_manager::u64());
 
     let data1 = msg1_with_no_compression.serialize().unwrap();
     let msg1_with_no_compression_deserialized = Message::deserialize(data1).unwrap();

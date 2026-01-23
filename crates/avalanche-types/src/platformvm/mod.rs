@@ -1,4 +1,6 @@
 //! Avalanche platformvm utilities.
+pub mod fees;
+pub mod l1;
 pub mod txs;
 
 use crate::ids;

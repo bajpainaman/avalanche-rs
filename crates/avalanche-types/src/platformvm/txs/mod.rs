@@ -1,10 +1,15 @@
 pub mod add_permissionless_validator;
 pub mod add_subnet_validator;
 pub mod add_validator;
+pub mod convert_subnet_to_l1;
 pub mod create_chain;
 pub mod create_subnet;
+pub mod disable_l1_validator;
 pub mod export;
 pub mod import;
+pub mod increase_l1_validator_balance;
+pub mod register_l1_validator;
+pub mod set_l1_validator_weight;
 pub mod status;
 
 use std::cmp::Ordering;

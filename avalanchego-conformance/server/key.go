@@ -16,10 +16,10 @@ import (
 	"github.com/ava-labs/avalanchego/utils/cb58"
 	"github.com/ava-labs/avalanchego/utils/constants"
 	"github.com/ava-labs/avalanchego/utils/crypto/bls"
+	"github.com/ava-labs/avalanchego/utils/crypto/bls/signer/localsigner"
 	"github.com/ava-labs/avalanchego/utils/crypto/secp256k1"
 	"github.com/ava-labs/avalanchego/utils/formatting/address"
 	"github.com/ava-labs/avalanchego/utils/hashing"
-	eth_crypto "github.com/ethereum/go-ethereum/crypto"
 	"go.uber.org/zap"
 )
 
@@ -44,9 +44,9 @@ func (s *server) Secp256K1RecoverHashPublicKey(ctx context.Context, req *rpcpb.S
 	zap.L().Debug("received Secp256K1RecoverHashPublicKey request")
 
 	resp := &rpcpb.Secp256K1RecoverHashPublicKeyResponse{Success: true}
-	pubkey, err := s.secpFactory.RecoverHashPublicKey(req.Message, req.Signature)
+	pubkey, err := s.recoverCache.RecoverPublicKeyFromHash(req.Message, req.Signature)
 	if err != nil {
-		resp.Message = fmt.Sprintf("failed RecoverHashPublicKey %v", err)
+		resp.Message = fmt.Sprintf("failed RecoverPublicKeyFromHash %v", err)
 		resp.Success = false
 		return resp, nil
 	}
@@ -156,8 +156,7 @@ func decodePrivateKey(enc string) (*secp256k1.PrivateKey, error) {
 		return nil, err
 	}
 
-	keyFactory := new(secp256k1.Factory)
-	return keyFactory.ToPrivateKey(skBytes)
+	return secp256k1.ToPrivateKey(skBytes)
 }
 
 func encodeAddr(pk *secp256k1.PrivateKey, chainIDAlias string, hrp string) (string, error) {
@@ -170,19 +169,21 @@ func encodeShortAddr(pk *secp256k1.PrivateKey) string {
 }
 
 func encodeEthAddr(pk *secp256k1.PrivateKey) string {
-	ethAddr := eth_crypto.PubkeyToAddress(pk.ToECDSA().PublicKey)
-	return ethAddr.String()
+	// Use avalanchego's built-in EthAddress() method (available in v1.12.2+)
+	return pk.EthAddress().String()
 }
 
 func (s *server) BlsSignature(ctx context.Context, req *rpcpb.BlsSignatureRequest) (*rpcpb.BlsSignatureResponse, error) {
 	zap.L().Debug("received BlsSignature request")
 
-	sk, err := bls.SecretKeyFromBytes(req.PrivateKey)
+	// Create signer from secret key bytes using localsigner
+	signer, err := localsigner.FromBytes(req.PrivateKey)
 	if err != nil {
 		return nil, err
 	}
+	defer signer.Shutdown()
 
-	pubkey, err := bls.PublicKeyFromBytes(req.PublicKey)
+	pubkey, err := bls.PublicKeyFromCompressedBytes(req.PublicKey)
 	if err != nil {
 		return nil, err
 	}
@@ -192,7 +193,10 @@ func (s *server) BlsSignature(ctx context.Context, req *rpcpb.BlsSignatureReques
 	}
 
 	zap.L().Info("verifying Signature")
-	sig := bls.Sign(sk, req.Message)
+	sig, err := signer.Sign(req.Message)
+	if err != nil {
+		return nil, err
+	}
 	if !bls.Verify(pubkey, sig, req.Message) {
 		if resp.Message != "" {
 			resp.Message += ", "
@@ -215,7 +219,10 @@ func (s *server) BlsSignature(ctx context.Context, req *rpcpb.BlsSignatureReques
 	}
 
 	zap.L().Info("verifying SignatureProofOfPossession")
-	sigPoP := bls.SignProofOfPossession(sk, req.Message)
+	sigPoP, err := signer.SignProofOfPossession(req.Message)
+	if err != nil {
+		return nil, err
+	}
 	if !bls.VerifyProofOfPossession(pubkey, sigPoP, req.Message) {
 		if resp.Message != "" {
 			resp.Message += ", "
