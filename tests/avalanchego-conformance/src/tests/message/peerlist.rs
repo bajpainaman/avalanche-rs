@@ -1,6 +1,4 @@
-use std::net::IpAddr;
-
-use avalanche_types::{ids, message::peerlist::{self, ClaimedIpPort}};
+use avalanche_types::{ids, message::{self, peerlist::{self, ClaimedIpPort}}};
 use avalanchego_conformance_sdk::{Client, Peer as RpcPeer, PeerlistRequest};
 
 #[tokio::test]
@@ -14,22 +12,26 @@ async fn peerlist() {
     assert!(is_set);
     let cli = Client::new(&ep).await;
 
+    // v1.14.0: PeerList requires valid X.509 certificates
+    let (_, cert1) = cert_manager::x509::generate_der(None).expect("failed generate_der");
+    let (_, cert2) = cert_manager::x509::generate_der(None).expect("failed generate_der");
+
     // v1.14.0: ClaimedIpPort now includes tx_id field
     let claimed_ip_ports = vec![
         ClaimedIpPort {
-            certificate: random_manager::secure_bytes(50).unwrap(),
+            certificate: cert1.to_vec(),
             ip_addr: std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
             ip_port: 8080,
             time: 7,
-            sig: random_manager::secure_bytes(20).unwrap(),
+            sig: random_manager::secure_bytes(64).unwrap(), // BLS signature size
             tx_id: ids::Id::empty(),
         },
         ClaimedIpPort {
-            certificate: random_manager::secure_bytes(50).unwrap(),
+            certificate: cert2.to_vec(),
             ip_addr: std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
             ip_port: 8081,
             time: 7,
-            sig: random_manager::secure_bytes(20).unwrap(),
+            sig: random_manager::secure_bytes(64).unwrap(),
             tx_id: ids::Id::empty(),
         },
     ];
@@ -40,20 +42,11 @@ async fn peerlist() {
 
     let mut rpc_peers: Vec<RpcPeer> = Vec::new();
     for p in claimed_ip_ports.iter() {
-        let ip_bytes = match p.ip_addr {
-            IpAddr::V4(v) => {
-                // "avalanchego" encodes IPv4 address as it is
-                // (not compatible with IPv6, e.g., prepends 2 "0xFF"s as in Rust)
-                let octets = v.octets();
-                [
-                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, octets[0], octets[1], octets[2], octets[3],
-                ]
-            }
-            IpAddr::V6(v) => v.octets(),
-        };
+        // avalanchego encodes IPv4 as 4 bytes directly (not IPv4-mapped IPv6)
+        let ip_bytes = message::ip_addr_to_bytes(p.ip_addr);
         rpc_peers.push(RpcPeer {
             certificate: p.certificate.clone(),
-            ip_addr: ip_bytes.to_vec(),
+            ip_addr: ip_bytes,
             ip_port: p.ip_port as u32,
             timestamp: p.time,
             sig: p.sig.clone(),
@@ -67,7 +60,11 @@ async fn peerlist() {
         })
         .await
         .expect("failed peerlist");
-    assert!(resp.success);
+    if !resp.success {
+        log::error!("peerlist failed: {}", resp.message);
+        log::error!("expected: {:?}", resp.expected_serialized_msg);
+    }
+    assert!(resp.success, "peerlist failed: {}", resp.message);
 }
 
 #[tokio::test]
@@ -81,22 +78,26 @@ async fn peerlist_gzip_compress() {
     assert!(is_set);
     let cli = Client::new(&ep).await;
 
+    // v1.14.0: PeerList requires valid X.509 certificates
+    let (_, cert1) = cert_manager::x509::generate_der(None).expect("failed generate_der");
+    let (_, cert2) = cert_manager::x509::generate_der(None).expect("failed generate_der");
+
     // v1.14.0: ClaimedIpPort now includes tx_id field
     let claimed_ip_ports = vec![
         ClaimedIpPort {
-            certificate: random_manager::secure_bytes(50).unwrap(),
+            certificate: cert1.to_vec(),
             ip_addr: std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
             ip_port: 8080,
             time: 7,
-            sig: random_manager::secure_bytes(20).unwrap(),
+            sig: random_manager::secure_bytes(64).unwrap(),
             tx_id: ids::Id::empty(),
         },
         ClaimedIpPort {
-            certificate: random_manager::secure_bytes(50).unwrap(),
+            certificate: cert2.to_vec(),
             ip_addr: std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
             ip_port: 8081,
             time: 7,
-            sig: random_manager::secure_bytes(20).unwrap(),
+            sig: random_manager::secure_bytes(64).unwrap(),
             tx_id: ids::Id::empty(),
         },
     ];
@@ -109,20 +110,11 @@ async fn peerlist_gzip_compress() {
 
     let mut rpc_peers: Vec<RpcPeer> = Vec::new();
     for p in claimed_ip_ports.iter() {
-        let ip_bytes = match p.ip_addr {
-            IpAddr::V4(v) => {
-                // "avalanchego" encodes IPv4 address as it is
-                // (not compatible with IPv6, e.g., prepends 2 "0xFF"s as in Rust)
-                let octets = v.octets();
-                [
-                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, octets[0], octets[1], octets[2], octets[3],
-                ]
-            }
-            IpAddr::V6(v) => v.octets(),
-        };
+        // avalanchego encodes IPv4 as 4 bytes directly (not IPv4-mapped IPv6)
+        let ip_bytes = message::ip_addr_to_bytes(p.ip_addr);
         rpc_peers.push(RpcPeer {
             certificate: p.certificate.clone(),
-            ip_addr: ip_bytes.to_vec(),
+            ip_addr: ip_bytes,
             ip_port: p.ip_port as u32,
             timestamp: p.time,
             sig: p.sig.clone(),

@@ -25,12 +25,8 @@ pub mod state_summary_frontier;
 pub fn ip_addr_to_bytes(ip_addr: std::net::IpAddr) -> Vec<u8> {
     match ip_addr {
         std::net::IpAddr::V4(v) => {
-            // "avalanchego" encodes IPv4 address as it is
-            // (not compatible with IPv6, e.g., prepends 2 "0xFF"s as in Rust)
-            let octets = v.octets();
-            vec![
-                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, octets[0], octets[1], octets[2], octets[3],
-            ]
+            // avalanchego encodes IPv4 addresses as 4 bytes directly
+            v.octets().to_vec()
         }
         std::net::IpAddr::V6(v) => v.octets().to_vec(),
     }

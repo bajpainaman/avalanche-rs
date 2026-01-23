@@ -6,7 +6,6 @@ package server
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"fmt"
 	"net/netip"
 	"time"
@@ -18,7 +17,6 @@ import (
 	"github.com/ava-labs/avalanchego/staking"
 	"github.com/ava-labs/avalanchego/utils/compression"
 	"github.com/ava-labs/avalanchego/utils/ips"
-	"github.com/ava-labs/avalanchego/utils/wrappers"
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
 )
@@ -49,19 +47,15 @@ func (s *server) AcceptedFrontier(ctx context.Context, req *rpcpb.AcceptedFronti
 		return nil, err
 	}
 
-	// ref. "network/peer.writeMessages"
+	// Compare proto bytes directly (without network framing length prefix)
 	msgBytes := msg.Bytes()
-	msgLen := uint32(len(msgBytes))
-	msgLenBytes := [wrappers.IntLen]byte{}
-	binary.BigEndian.PutUint32(msgLenBytes[:], msgLen)
-	expected := append(msgLenBytes[:], msgBytes...)
 
 	resp := &rpcpb.AcceptedFrontierResponse{
-		ExpectedSerializedMsg: expected,
+		ExpectedSerializedMsg: msgBytes,
 		Success:               true,
 	}
-	if !bytes.Equal(req.SerializedMsg, expected) {
-		resp.Message = fmt.Sprintf("expected 0x%x", expected)
+	if !bytes.Equal(req.SerializedMsg, msgBytes) {
+		resp.Message = fmt.Sprintf("expected 0x%x, got 0x%x", msgBytes, req.SerializedMsg)
 		resp.Success = false
 	}
 
@@ -95,21 +89,17 @@ func (s *server) AcceptedStateSummary(ctx context.Context, req *rpcpb.AcceptedSt
 		return nil, err
 	}
 
-	// ref. "network/peer.writeMessages"
+	// Compare proto bytes directly (without network framing length prefix)
 	msgBytes := msg.Bytes()
-	msgLen := uint32(len(msgBytes))
-	msgLenBytes := [wrappers.IntLen]byte{}
-	binary.BigEndian.PutUint32(msgLenBytes[:], msgLen)
-	expected := append(msgLenBytes[:], msgBytes...)
 
 	resp := &rpcpb.AcceptedStateSummaryResponse{
-		ExpectedSerializedMsg: expected,
+		ExpectedSerializedMsg: msgBytes,
 		Success:               true,
 	}
 	// For compressed messages, just check that we got some output
 	// Compression implementations may differ between Go/Rust
-	if !req.GzipCompressed && !bytes.Equal(req.SerializedMsg, expected) {
-		resp.Message = fmt.Sprintf("expected 0x%x", expected)
+	if !req.GzipCompressed && !bytes.Equal(req.SerializedMsg, msgBytes) {
+		resp.Message = fmt.Sprintf("expected 0x%x, got 0x%x", msgBytes, req.SerializedMsg)
 		resp.Success = false
 	}
 
@@ -139,19 +129,15 @@ func (s *server) Accepted(ctx context.Context, req *rpcpb.AcceptedRequest) (*rpc
 		return nil, err
 	}
 
-	// ref. "network/peer.writeMessages"
+	// Compare proto bytes directly (without network framing length prefix)
 	msgBytes := msg.Bytes()
-	msgLen := uint32(len(msgBytes))
-	msgLenBytes := [wrappers.IntLen]byte{}
-	binary.BigEndian.PutUint32(msgLenBytes[:], msgLen)
-	expected := append(msgLenBytes[:], msgBytes...)
 
 	resp := &rpcpb.AcceptedResponse{
-		ExpectedSerializedMsg: expected,
+		ExpectedSerializedMsg: msgBytes,
 		Success:               true,
 	}
-	if !bytes.Equal(req.SerializedMsg, expected) {
-		resp.Message = fmt.Sprintf("expected 0x%x", expected)
+	if !bytes.Equal(req.SerializedMsg, msgBytes) {
+		resp.Message = fmt.Sprintf("expected 0x%x, got 0x%x", msgBytes, req.SerializedMsg)
 		resp.Success = false
 	}
 
@@ -178,19 +164,15 @@ func (s *server) Ancestors(ctx context.Context, req *rpcpb.AncestorsRequest) (*r
 		return nil, err
 	}
 
-	// ref. "network/peer.writeMessages"
+	// Compare proto bytes directly (without network framing length prefix)
 	msgBytes := msg.Bytes()
-	msgLen := uint32(len(msgBytes))
-	msgLenBytes := [wrappers.IntLen]byte{}
-	binary.BigEndian.PutUint32(msgLenBytes[:], msgLen)
-	expected := append(msgLenBytes[:], msgBytes...)
 
 	resp := &rpcpb.AncestorsResponse{
-		ExpectedSerializedMsg: expected,
+		ExpectedSerializedMsg: msgBytes,
 		Success:               true,
 	}
-	if !req.GzipCompressed && !bytes.Equal(req.SerializedMsg, expected) {
-		resp.Message = fmt.Sprintf("expected 0x%x", expected)
+	if !req.GzipCompressed && !bytes.Equal(req.SerializedMsg, msgBytes) {
+		resp.Message = fmt.Sprintf("expected 0x%x, got 0x%x", msgBytes, req.SerializedMsg)
 		resp.Success = false
 	}
 
@@ -217,19 +199,15 @@ func (s *server) AppGossip(ctx context.Context, req *rpcpb.AppGossipRequest) (*r
 		return nil, err
 	}
 
-	// ref. "network/peer.writeMessages"
+	// Compare proto bytes directly (without network framing length prefix)
 	msgBytes := msg.Bytes()
-	msgLen := uint32(len(msgBytes))
-	msgLenBytes := [wrappers.IntLen]byte{}
-	binary.BigEndian.PutUint32(msgLenBytes[:], msgLen)
-	expected := append(msgLenBytes[:], msgBytes...)
 
 	resp := &rpcpb.AppGossipResponse{
-		ExpectedSerializedMsg: expected,
+		ExpectedSerializedMsg: msgBytes,
 		Success:               true,
 	}
-	if !req.GzipCompressed && !bytes.Equal(req.SerializedMsg, expected) {
-		resp.Message = fmt.Sprintf("expected 0x%x", expected)
+	if !req.GzipCompressed && !bytes.Equal(req.SerializedMsg, msgBytes) {
+		resp.Message = fmt.Sprintf("expected 0x%x, got 0x%x", msgBytes, req.SerializedMsg)
 		resp.Success = false
 	}
 
@@ -256,19 +234,15 @@ func (s *server) AppRequest(ctx context.Context, req *rpcpb.AppRequestRequest) (
 		return nil, err
 	}
 
-	// ref. "network/peer.writeMessages"
+	// Compare proto bytes directly (without network framing length prefix)
 	msgBytes := msg.Bytes()
-	msgLen := uint32(len(msgBytes))
-	msgLenBytes := [wrappers.IntLen]byte{}
-	binary.BigEndian.PutUint32(msgLenBytes[:], msgLen)
-	expected := append(msgLenBytes[:], msgBytes...)
 
 	resp := &rpcpb.AppRequestResponse{
-		ExpectedSerializedMsg: expected,
+		ExpectedSerializedMsg: msgBytes,
 		Success:               true,
 	}
-	if !req.GzipCompressed && !bytes.Equal(req.SerializedMsg, expected) {
-		resp.Message = fmt.Sprintf("expected 0x%x", expected)
+	if !req.GzipCompressed && !bytes.Equal(req.SerializedMsg, msgBytes) {
+		resp.Message = fmt.Sprintf("expected 0x%x, got 0x%x", msgBytes, req.SerializedMsg)
 		resp.Success = false
 	}
 
@@ -295,19 +269,15 @@ func (s *server) AppResponse(ctx context.Context, req *rpcpb.AppResponseRequest)
 		return nil, err
 	}
 
-	// ref. "network/peer.writeMessages"
+	// Compare proto bytes directly (without network framing length prefix)
 	msgBytes := msg.Bytes()
-	msgLen := uint32(len(msgBytes))
-	msgLenBytes := [wrappers.IntLen]byte{}
-	binary.BigEndian.PutUint32(msgLenBytes[:], msgLen)
-	expected := append(msgLenBytes[:], msgBytes...)
 
 	resp := &rpcpb.AppResponseResponse{
-		ExpectedSerializedMsg: expected,
+		ExpectedSerializedMsg: msgBytes,
 		Success:               true,
 	}
-	if !req.GzipCompressed && !bytes.Equal(req.SerializedMsg, expected) {
-		resp.Message = fmt.Sprintf("expected 0x%x", expected)
+	if !req.GzipCompressed && !bytes.Equal(req.SerializedMsg, msgBytes) {
+		resp.Message = fmt.Sprintf("expected 0x%x, got 0x%x", msgBytes, req.SerializedMsg)
 		resp.Success = false
 	}
 
@@ -337,19 +307,15 @@ func (s *server) Chits(ctx context.Context, req *rpcpb.ChitsRequest) (*rpcpb.Chi
 		return nil, err
 	}
 
-	// ref. "network/peer.writeMessages"
+	// Compare proto bytes directly (without network framing length prefix)
 	msgBytes := msg.Bytes()
-	msgLen := uint32(len(msgBytes))
-	msgLenBytes := [wrappers.IntLen]byte{}
-	binary.BigEndian.PutUint32(msgLenBytes[:], msgLen)
-	expected := append(msgLenBytes[:], msgBytes...)
 
 	resp := &rpcpb.ChitsResponse{
-		ExpectedSerializedMsg: expected,
+		ExpectedSerializedMsg: msgBytes,
 		Success:               true,
 	}
-	if !bytes.Equal(req.SerializedMsg, expected) {
-		resp.Message = fmt.Sprintf("expected 0x%x", expected)
+	if !bytes.Equal(req.SerializedMsg, msgBytes) {
+		resp.Message = fmt.Sprintf("expected 0x%x, got 0x%x", msgBytes, req.SerializedMsg)
 		resp.Success = false
 	}
 
@@ -372,19 +338,15 @@ func (s *server) GetAcceptedFrontier(ctx context.Context, req *rpcpb.GetAccepted
 		return nil, err
 	}
 
-	// ref. "network/peer.writeMessages"
+	// Compare proto bytes directly (without network framing length prefix)
 	msgBytes := msg.Bytes()
-	msgLen := uint32(len(msgBytes))
-	msgLenBytes := [wrappers.IntLen]byte{}
-	binary.BigEndian.PutUint32(msgLenBytes[:], msgLen)
-	expected := append(msgLenBytes[:], msgBytes...)
 
 	resp := &rpcpb.GetAcceptedFrontierResponse{
-		ExpectedSerializedMsg: expected,
+		ExpectedSerializedMsg: msgBytes,
 		Success:               true,
 	}
-	if !bytes.Equal(req.SerializedMsg, expected) {
-		resp.Message = fmt.Sprintf("expected 0x%x", expected)
+	if !bytes.Equal(req.SerializedMsg, msgBytes) {
+		resp.Message = fmt.Sprintf("expected 0x%x, got 0x%x", msgBytes, req.SerializedMsg)
 		resp.Success = false
 	}
 
@@ -411,19 +373,15 @@ func (s *server) GetAcceptedStateSummary(ctx context.Context, req *rpcpb.GetAcce
 		return nil, err
 	}
 
-	// ref. "network/peer.writeMessages"
+	// Compare proto bytes directly (without network framing length prefix)
 	msgBytes := msg.Bytes()
-	msgLen := uint32(len(msgBytes))
-	msgLenBytes := [wrappers.IntLen]byte{}
-	binary.BigEndian.PutUint32(msgLenBytes[:], msgLen)
-	expected := append(msgLenBytes[:], msgBytes...)
 
 	resp := &rpcpb.GetAcceptedStateSummaryResponse{
-		ExpectedSerializedMsg: expected,
+		ExpectedSerializedMsg: msgBytes,
 		Success:               true,
 	}
-	if !req.GzipCompressed && !bytes.Equal(req.SerializedMsg, expected) {
-		resp.Message = fmt.Sprintf("expected 0x%x", expected)
+	if !req.GzipCompressed && !bytes.Equal(req.SerializedMsg, msgBytes) {
+		resp.Message = fmt.Sprintf("expected 0x%x, got 0x%x", msgBytes, req.SerializedMsg)
 		resp.Success = false
 	}
 
@@ -453,19 +411,15 @@ func (s *server) GetAccepted(ctx context.Context, req *rpcpb.GetAcceptedRequest)
 		return nil, err
 	}
 
-	// ref. "network/peer.writeMessages"
+	// Compare proto bytes directly (without network framing length prefix)
 	msgBytes := msg.Bytes()
-	msgLen := uint32(len(msgBytes))
-	msgLenBytes := [wrappers.IntLen]byte{}
-	binary.BigEndian.PutUint32(msgLenBytes[:], msgLen)
-	expected := append(msgLenBytes[:], msgBytes...)
 
 	resp := &rpcpb.GetAcceptedResponse{
-		ExpectedSerializedMsg: expected,
+		ExpectedSerializedMsg: msgBytes,
 		Success:               true,
 	}
-	if !bytes.Equal(req.SerializedMsg, expected) {
-		resp.Message = fmt.Sprintf("expected 0x%x", expected)
+	if !bytes.Equal(req.SerializedMsg, msgBytes) {
+		resp.Message = fmt.Sprintf("expected 0x%x, got 0x%x", msgBytes, req.SerializedMsg)
 		resp.Success = false
 	}
 
@@ -486,25 +440,21 @@ func (s *server) GetAncestors(ctx context.Context, req *rpcpb.GetAncestorsReques
 	containerID := [32]byte{}
 	copy(containerID[:], req.ContainerId)
 
-	// GetAncestors still requires EngineType in v1.14.0 (ENGINE_TYPE_CHAIN for Snowman)
-	msg, err := mc.GetAncestors(chainID, req.RequestId, time.Duration(req.Deadline), containerID, p2p.EngineType_ENGINE_TYPE_CHAIN)
+	// Use ENGINE_TYPE_UNSPECIFIED to match Rust's default (0)
+	msg, err := mc.GetAncestors(chainID, req.RequestId, time.Duration(req.Deadline), containerID, p2p.EngineType_ENGINE_TYPE_UNSPECIFIED)
 	if err != nil {
 		return nil, err
 	}
 
-	// ref. "network/peer.writeMessages"
+	// Compare proto bytes directly (without network framing length prefix)
 	msgBytes := msg.Bytes()
-	msgLen := uint32(len(msgBytes))
-	msgLenBytes := [wrappers.IntLen]byte{}
-	binary.BigEndian.PutUint32(msgLenBytes[:], msgLen)
-	expected := append(msgLenBytes[:], msgBytes...)
 
 	resp := &rpcpb.GetAncestorsResponse{
-		ExpectedSerializedMsg: expected,
+		ExpectedSerializedMsg: msgBytes,
 		Success:               true,
 	}
-	if !bytes.Equal(req.SerializedMsg, expected) {
-		resp.Message = fmt.Sprintf("expected 0x%x", expected)
+	if !bytes.Equal(req.SerializedMsg, msgBytes) {
+		resp.Message = fmt.Sprintf("expected 0x%x, got 0x%x", msgBytes, req.SerializedMsg)
 		resp.Success = false
 	}
 
@@ -527,19 +477,15 @@ func (s *server) GetStateSummaryFrontier(ctx context.Context, req *rpcpb.GetStat
 		return nil, err
 	}
 
-	// ref. "network/peer.writeMessages"
+	// Compare proto bytes directly (without network framing length prefix)
 	msgBytes := msg.Bytes()
-	msgLen := uint32(len(msgBytes))
-	msgLenBytes := [wrappers.IntLen]byte{}
-	binary.BigEndian.PutUint32(msgLenBytes[:], msgLen)
-	expected := append(msgLenBytes[:], msgBytes...)
 
 	resp := &rpcpb.GetStateSummaryFrontierResponse{
-		ExpectedSerializedMsg: expected,
+		ExpectedSerializedMsg: msgBytes,
 		Success:               true,
 	}
-	if !bytes.Equal(req.SerializedMsg, expected) {
-		resp.Message = fmt.Sprintf("expected 0x%x", expected)
+	if !bytes.Equal(req.SerializedMsg, msgBytes) {
+		resp.Message = fmt.Sprintf("expected 0x%x, got 0x%x", msgBytes, req.SerializedMsg)
 		resp.Success = false
 	}
 
@@ -565,19 +511,15 @@ func (s *server) Get(ctx context.Context, req *rpcpb.GetRequest) (*rpcpb.GetResp
 		return nil, err
 	}
 
-	// ref. "network/peer.writeMessages"
+	// Compare proto bytes directly (without network framing length prefix)
 	msgBytes := msg.Bytes()
-	msgLen := uint32(len(msgBytes))
-	msgLenBytes := [wrappers.IntLen]byte{}
-	binary.BigEndian.PutUint32(msgLenBytes[:], msgLen)
-	expected := append(msgLenBytes[:], msgBytes...)
 
 	resp := &rpcpb.GetResponse{
-		ExpectedSerializedMsg: expected,
+		ExpectedSerializedMsg: msgBytes,
 		Success:               true,
 	}
-	if !bytes.Equal(req.SerializedMsg, expected) {
-		resp.Message = fmt.Sprintf("expected 0x%x", expected)
+	if !bytes.Equal(req.SerializedMsg, msgBytes) {
+		resp.Message = fmt.Sprintf("expected 0x%x, got 0x%x", msgBytes, req.SerializedMsg)
 		resp.Success = false
 	}
 
@@ -604,7 +546,7 @@ func (s *server) Peerlist(ctx context.Context, req *rpcpb.PeerlistRequest) (*rpc
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse certificate: %w", err)
 		}
-		// Build IP address from 4 bytes
+		// Build IP address from 4 bytes (IPv4 encoded directly)
 		var ipBytes [4]byte
 		if len(p.IpAddr) >= 4 {
 			copy(ipBytes[:], p.IpAddr[:4])
@@ -625,19 +567,15 @@ func (s *server) Peerlist(ctx context.Context, req *rpcpb.PeerlistRequest) (*rpc
 		return nil, err
 	}
 
-	// ref. "network/peer.writeMessages"
+	// Compare proto bytes directly (without network framing length prefix)
 	msgBytes := msg.Bytes()
-	msgLen := uint32(len(msgBytes))
-	msgLenBytes := [wrappers.IntLen]byte{}
-	binary.BigEndian.PutUint32(msgLenBytes[:], msgLen)
-	expected := append(msgLenBytes[:], msgBytes...)
 
 	resp := &rpcpb.PeerlistResponse{
-		ExpectedSerializedMsg: expected,
+		ExpectedSerializedMsg: msgBytes,
 		Success:               true,
 	}
-	if !req.GzipCompressed && !bytes.Equal(req.SerializedMsg, expected) {
-		resp.Message = fmt.Sprintf("expected 0x%x", expected)
+	if !req.GzipCompressed && !bytes.Equal(req.SerializedMsg, msgBytes) {
+		resp.Message = fmt.Sprintf("expected 0x%x, got 0x%x", msgBytes, req.SerializedMsg)
 		resp.Success = false
 	}
 
@@ -658,19 +596,15 @@ func (s *server) Ping(ctx context.Context, req *rpcpb.PingRequest) (*rpcpb.PingR
 		return nil, err
 	}
 
-	// ref. "network/peer.writeMessages"
+	// Compare proto bytes directly (without network framing length prefix)
 	msgBytes := msg.Bytes()
-	msgLen := uint32(len(msgBytes))
-	msgLenBytes := [wrappers.IntLen]byte{}
-	binary.BigEndian.PutUint32(msgLenBytes[:], msgLen)
-	expected := append(msgLenBytes[:], msgBytes...)
 
 	resp := &rpcpb.PingResponse{
-		ExpectedSerializedMsg: expected,
+		ExpectedSerializedMsg: msgBytes,
 		Success:               true,
 	}
-	if !bytes.Equal(req.SerializedMsg, expected) {
-		resp.Message = fmt.Sprintf("expected 0x%x", expected)
+	if !bytes.Equal(req.SerializedMsg, msgBytes) {
+		resp.Message = fmt.Sprintf("expected 0x%x, got 0x%x", msgBytes, req.SerializedMsg)
 		resp.Success = false
 	}
 
@@ -691,19 +625,15 @@ func (s *server) Pong(ctx context.Context, req *rpcpb.PongRequest) (*rpcpb.PongR
 		return nil, err
 	}
 
-	// ref. "network/peer.writeMessages"
+	// Compare proto bytes directly (without network framing length prefix)
 	msgBytes := msg.Bytes()
-	msgLen := uint32(len(msgBytes))
-	msgLenBytes := [wrappers.IntLen]byte{}
-	binary.BigEndian.PutUint32(msgLenBytes[:], msgLen)
-	expected := append(msgLenBytes[:], msgBytes...)
 
 	resp := &rpcpb.PongResponse{
-		ExpectedSerializedMsg: expected,
+		ExpectedSerializedMsg: msgBytes,
 		Success:               true,
 	}
-	if !bytes.Equal(req.SerializedMsg, expected) {
-		resp.Message = fmt.Sprintf("expected 0x%x", expected)
+	if !bytes.Equal(req.SerializedMsg, msgBytes) {
+		resp.Message = fmt.Sprintf("expected 0x%x, got 0x%x", msgBytes, req.SerializedMsg)
 		resp.Success = false
 	}
 
@@ -729,19 +659,15 @@ func (s *server) PullQuery(ctx context.Context, req *rpcpb.PullQueryRequest) (*r
 		return nil, err
 	}
 
-	// ref. "network/peer.writeMessages"
+	// Compare proto bytes directly (without network framing length prefix)
 	msgBytes := msg.Bytes()
-	msgLen := uint32(len(msgBytes))
-	msgLenBytes := [wrappers.IntLen]byte{}
-	binary.BigEndian.PutUint32(msgLenBytes[:], msgLen)
-	expected := append(msgLenBytes[:], msgBytes...)
 
 	resp := &rpcpb.PullQueryResponse{
-		ExpectedSerializedMsg: expected,
+		ExpectedSerializedMsg: msgBytes,
 		Success:               true,
 	}
-	if !bytes.Equal(req.SerializedMsg, expected) {
-		resp.Message = fmt.Sprintf("expected 0x%x", expected)
+	if !bytes.Equal(req.SerializedMsg, msgBytes) {
+		resp.Message = fmt.Sprintf("expected 0x%x, got 0x%x", msgBytes, req.SerializedMsg)
 		resp.Success = false
 	}
 
@@ -768,19 +694,15 @@ func (s *server) PushQuery(ctx context.Context, req *rpcpb.PushQueryRequest) (*r
 		return nil, err
 	}
 
-	// ref. "network/peer.writeMessages"
+	// Compare proto bytes directly (without network framing length prefix)
 	msgBytes := msg.Bytes()
-	msgLen := uint32(len(msgBytes))
-	msgLenBytes := [wrappers.IntLen]byte{}
-	binary.BigEndian.PutUint32(msgLenBytes[:], msgLen)
-	expected := append(msgLenBytes[:], msgBytes...)
 
 	resp := &rpcpb.PushQueryResponse{
-		ExpectedSerializedMsg: expected,
+		ExpectedSerializedMsg: msgBytes,
 		Success:               true,
 	}
-	if !req.GzipCompressed && !bytes.Equal(req.SerializedMsg, expected) {
-		resp.Message = fmt.Sprintf("expected 0x%x", expected)
+	if !req.GzipCompressed && !bytes.Equal(req.SerializedMsg, msgBytes) {
+		resp.Message = fmt.Sprintf("expected 0x%x, got 0x%x", msgBytes, req.SerializedMsg)
 		resp.Success = false
 	}
 
@@ -807,19 +729,15 @@ func (s *server) Put(ctx context.Context, req *rpcpb.PutRequest) (*rpcpb.PutResp
 		return nil, err
 	}
 
-	// ref. "network/peer.writeMessages"
+	// Compare proto bytes directly (without network framing length prefix)
 	msgBytes := msg.Bytes()
-	msgLen := uint32(len(msgBytes))
-	msgLenBytes := [wrappers.IntLen]byte{}
-	binary.BigEndian.PutUint32(msgLenBytes[:], msgLen)
-	expected := append(msgLenBytes[:], msgBytes...)
 
 	resp := &rpcpb.PutResponse{
-		ExpectedSerializedMsg: expected,
+		ExpectedSerializedMsg: msgBytes,
 		Success:               true,
 	}
-	if !req.GzipCompressed && !bytes.Equal(req.SerializedMsg, expected) {
-		resp.Message = fmt.Sprintf("expected 0x%x", expected)
+	if !req.GzipCompressed && !bytes.Equal(req.SerializedMsg, msgBytes) {
+		resp.Message = fmt.Sprintf("expected 0x%x, got 0x%x", msgBytes, req.SerializedMsg)
 		resp.Success = false
 	}
 
@@ -846,19 +764,15 @@ func (s *server) StateSummaryFrontier(ctx context.Context, req *rpcpb.StateSumma
 		return nil, err
 	}
 
-	// ref. "network/peer.writeMessages"
+	// Compare proto bytes directly (without network framing length prefix)
 	msgBytes := msg.Bytes()
-	msgLen := uint32(len(msgBytes))
-	msgLenBytes := [wrappers.IntLen]byte{}
-	binary.BigEndian.PutUint32(msgLenBytes[:], msgLen)
-	expected := append(msgLenBytes[:], msgBytes...)
 
 	resp := &rpcpb.StateSummaryFrontierResponse{
-		ExpectedSerializedMsg: expected,
+		ExpectedSerializedMsg: msgBytes,
 		Success:               true,
 	}
-	if !req.GzipCompressed && !bytes.Equal(req.SerializedMsg, expected) {
-		resp.Message = fmt.Sprintf("expected 0x%x", expected)
+	if !req.GzipCompressed && !bytes.Equal(req.SerializedMsg, msgBytes) {
+		resp.Message = fmt.Sprintf("expected 0x%x, got 0x%x", msgBytes, req.SerializedMsg)
 		resp.Success = false
 	}
 
@@ -909,19 +823,15 @@ func (s *server) Version(ctx context.Context, req *rpcpb.VersionRequest) (*rpcpb
 		return nil, err
 	}
 
-	// ref. "network/peer.writeMessages"
+	// Compare proto bytes directly (without network framing length prefix)
 	msgBytes := msg.Bytes()
-	msgLen := uint32(len(msgBytes))
-	msgLenBytes := [wrappers.IntLen]byte{}
-	binary.BigEndian.PutUint32(msgLenBytes[:], msgLen)
-	expected := append(msgLenBytes[:], msgBytes...)
 
 	resp := &rpcpb.VersionResponse{
-		ExpectedSerializedMsg: expected,
+		ExpectedSerializedMsg: msgBytes,
 		Success:               true,
 	}
-	if !bytes.Equal(req.SerializedMsg, expected) {
-		resp.Message = fmt.Sprintf("expected 0x%x", expected)
+	if !bytes.Equal(req.SerializedMsg, msgBytes) {
+		resp.Message = fmt.Sprintf("expected 0x%x, got 0x%x", msgBytes, req.SerializedMsg)
 		resp.Success = false
 	}
 
