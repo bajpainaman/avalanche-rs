@@ -41,6 +41,13 @@ use prost::bytes::Bytes;
 use tokio::sync::{broadcast, mpsc, RwLock};
 use tonic::{Request, Response};
 
+/// Event type for VM to signal to the consensus engine.
+/// Re-exported from proto for convenience.
+pub type Event = vm::Message;
+
+/// Event notifier type that VMs can use to signal events.
+pub type EventNotifier = mpsc::Sender<Event>;
+
 pub struct Server<V> {
     /// Underlying Vm implementation.
     pub vm: Arc<RwLock<V>>,
@@ -52,17 +59,40 @@ pub struct Server<V> {
 
     /// Stop channel broadcast producer.
     pub stop_ch: broadcast::Sender<()>,
+
+    /// Event channel receiver - receives events from the VM.
+    /// Used by wait_for_event to block until an event is ready.
+    event_rx: Arc<RwLock<mpsc::Receiver<Event>>>,
+
+    /// Event channel sender - passed to VM to signal events.
+    /// Clone this to get a notifier that can signal BuildBlock or StateSyncFinished.
+    event_tx: mpsc::Sender<Event>,
 }
 
 impl<V: ChainVm> Server<V> {
+    /// Default capacity for the event channel.
+    /// Small buffer since events are consumed immediately by wait_for_event.
+    const EVENT_CHANNEL_CAPACITY: usize = 16;
+
     pub fn new(vm: V, stop_ch: broadcast::Sender<()>) -> Self {
+        let (event_tx, event_rx) = mpsc::channel(Self::EVENT_CHANNEL_CAPACITY);
+
         Self {
             vm: Arc::new(RwLock::new(vm)),
             #[cfg(feature = "subnet_metrics")]
             #[cfg_attr(docsrs, doc(cfg(feature = "subnet_metrics")))]
             process_metrics: Arc::new(RwLock::new(prometheus::default_registry().to_owned())),
             stop_ch,
+            event_rx: Arc::new(RwLock::new(event_rx)),
+            event_tx,
         }
+    }
+
+    /// Returns an event notifier that can be used by the VM to signal events.
+    /// The VM should call `notifier.send(Event::BuildBlock)` when it has
+    /// pending transactions ready to build into a block.
+    pub fn event_notifier(&self) -> EventNotifier {
+        self.event_tx.clone()
     }
 
     /// Attempts to get the ancestors of a block from the underlying Vm.
@@ -320,19 +350,43 @@ where
     /// Waits for the next event from the VM.
     /// Returns when the VM has an event (e.g., BuildBlock, StateSyncFinished).
     ///
+    /// This method blocks until the VM signals an event via the event notifier.
+    /// Use `server.event_notifier()` to get a sender that can signal events.
+    ///
     /// ref. <https://github.com/ava-labs/avalanchego/blob/v1.14.0/vms/rpcchainvm/vm_server.go>
     async fn wait_for_event(
         &self,
         _req: Request<Empty>,
     ) -> std::result::Result<Response<vm::WaitForEventResponse>, tonic::Status> {
-        log::debug!("wait_for_event called");
+        log::debug!("wait_for_event called, waiting for VM event...");
 
-        // TODO: Implement event-driven model with internal event queue
-        // For now, return BuildBlock as the default event
-        // The VM should signal events through a channel that this method waits on
-        Ok(Response::new(vm::WaitForEventResponse {
-            message: vm::Message::BuildBlock as i32,
-        }))
+        // Wait for the next event from the VM
+        let mut event_rx = self.event_rx.write().await;
+
+        // Also listen for stop signal to allow graceful shutdown
+        let mut stop_rx = self.stop_ch.subscribe();
+
+        tokio::select! {
+            event = event_rx.recv() => {
+                match event {
+                    Some(msg) => {
+                        log::debug!("wait_for_event received: {:?}", msg);
+                        Ok(Response::new(vm::WaitForEventResponse {
+                            message: msg as i32,
+                        }))
+                    }
+                    None => {
+                        // Channel closed, VM is shutting down
+                        log::warn!("wait_for_event: event channel closed");
+                        Err(tonic::Status::unavailable("VM event channel closed"))
+                    }
+                }
+            }
+            _ = stop_rx.recv() => {
+                log::debug!("wait_for_event: received stop signal");
+                Err(tonic::Status::cancelled("VM is shutting down"))
+            }
+        }
     }
 
     async fn build_block(
