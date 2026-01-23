@@ -11,9 +11,11 @@ use avalanchego_conformance_sdk::{
     WarpUnsignedMessageRequest,
 };
 
-fn get_endpoint() -> String {
-    env::var("AVALANCHEGO_CONFORMANCE_SERVER_RPC_ENDPOINT")
-        .unwrap_or_else(|_| "http://127.0.0.1:22342".to_string())
+fn get_endpoint() -> (String, bool) {
+    match env::var("AVALANCHEGO_CONFORMANCE_SERVER_RPC_ENDPOINT") {
+        Ok(s) => (s, true),
+        _ => (String::new(), false),
+    }
 }
 
 // ============================================================================
@@ -22,7 +24,9 @@ fn get_endpoint() -> String {
 
 #[tokio::test]
 async fn test_l1_validator_weight_payload_conformance() {
-    let cli = Client::new(&get_endpoint()).await;
+    let (ep, is_set) = get_endpoint();
+    if !is_set { eprintln!("SKIPPING: server not configured"); return; }
+    let cli = Client::new(&ep).await;
 
     let validation_id = vec![1u8; 32];
     let nonce = 42u64;
@@ -62,7 +66,9 @@ async fn test_l1_validator_weight_payload_conformance() {
 
 #[tokio::test]
 async fn test_subnet_to_l1_conversion_payload_conformance() {
-    let cli = Client::new(&get_endpoint()).await;
+    let (ep, is_set) = get_endpoint();
+    if !is_set { eprintln!("SKIPPING: server not configured"); return; }
+    let cli = Client::new(&ep).await;
 
     let subnet_id = vec![2u8; 32];
 
@@ -98,7 +104,9 @@ async fn test_subnet_to_l1_conversion_payload_conformance() {
 
 #[tokio::test]
 async fn test_warp_unsigned_message_conformance() {
-    let cli = Client::new(&get_endpoint()).await;
+    let (ep, is_set) = get_endpoint();
+    if !is_set { eprintln!("SKIPPING: server not configured"); return; }
+    let cli = Client::new(&ep).await;
 
     let network_id = 1u32;
     let source_chain_id = vec![3u8; 32];
@@ -135,7 +143,9 @@ async fn test_warp_unsigned_message_conformance() {
 
 #[tokio::test]
 async fn test_warp_message_conformance() {
-    let cli = Client::new(&get_endpoint()).await;
+    let (ep, is_set) = get_endpoint();
+    if !is_set { eprintln!("SKIPPING: server not configured"); return; }
+    let cli = Client::new(&ep).await;
 
     // Create simple unsigned message
     let network_id = 1u32;
@@ -185,7 +195,9 @@ async fn test_warp_message_conformance() {
 
 #[tokio::test]
 async fn test_convert_subnet_to_l1_tx_conformance() {
-    let cli = Client::new(&get_endpoint()).await;
+    let (ep, is_set) = get_endpoint();
+    if !is_set { eprintln!("SKIPPING: server not configured"); return; }
+    let cli = Client::new(&ep).await;
 
     let network_id = 1u32;
     let blockchain_id = vec![5u8; 32];
@@ -232,7 +244,9 @@ async fn test_convert_subnet_to_l1_tx_conformance() {
 
 #[tokio::test]
 async fn test_increase_l1_validator_balance_tx_conformance() {
-    let cli = Client::new(&get_endpoint()).await;
+    let (ep, is_set) = get_endpoint();
+    if !is_set { eprintln!("SKIPPING: server not configured"); return; }
+    let cli = Client::new(&ep).await;
 
     let network_id = 1u32;
     let blockchain_id = vec![13u8; 32];
@@ -264,7 +278,9 @@ async fn test_increase_l1_validator_balance_tx_conformance() {
 
 #[tokio::test]
 async fn test_disable_l1_validator_tx_conformance() {
-    let cli = Client::new(&get_endpoint()).await;
+    let (ep, is_set) = get_endpoint();
+    if !is_set { eprintln!("SKIPPING: server not configured"); return; }
+    let cli = Client::new(&ep).await;
 
     let network_id = 1u32;
     let blockchain_id = vec![15u8; 32];
