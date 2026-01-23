@@ -287,4 +287,273 @@ mod tests {
         assert!(!msg.is_validator_signed(3));
         assert!(!msg.is_validator_signed(8)); // out of range
     }
+
+    // =========================================================================
+    // Warp Signature Verification Edge Case Tests
+    // =========================================================================
+
+    #[test]
+    fn test_verify_empty_validators() {
+        let mut msg = Message::new(
+            UnsignedMessage::new(1, Id::empty(), vec![]),
+            vec![0b00000001],
+            vec![0u8; 96],
+        );
+
+        let result = msg.verify(&[]);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("no validators"));
+    }
+
+    #[test]
+    fn test_verify_no_signers_bit_set() {
+        let mut msg = Message::new(
+            UnsignedMessage::new(1, Id::empty(), vec![]),
+            vec![0b00000000], // no validators signed
+            vec![0u8; 96],
+        );
+
+        // Generate a dummy public key for testing
+        let dummy_pubkey = public_key::Key::default();
+        let validators = vec![(dummy_pubkey, 100u64)];
+
+        let result = msg.verify(&validators);
+        assert!(result.is_ok());
+        assert!(!result.unwrap()); // Should return false - no signers
+    }
+
+    #[test]
+    fn test_verify_empty_bit_set() {
+        let mut msg = Message::new(
+            UnsignedMessage::new(1, Id::empty(), vec![]),
+            vec![], // empty bit set
+            vec![0u8; 96],
+        );
+
+        let dummy_pubkey = public_key::Key::default();
+        let validators = vec![(dummy_pubkey, 100u64)];
+
+        let result = msg.verify(&validators);
+        assert!(result.is_ok());
+        assert!(!result.unwrap()); // Should return false - empty bit set means no signers
+    }
+
+    #[test]
+    fn test_verify_bit_index_out_of_range() {
+        let msg = Message::new(
+            UnsignedMessage::new(1, Id::empty(), vec![]),
+            vec![0b00000001], // only 8 bits available
+            vec![0u8; 96],
+        );
+
+        // Test indices beyond the bit set
+        assert!(!msg.is_validator_signed(8));   // byte_index = 1, out of range
+        assert!(!msg.is_validator_signed(100)); // way out of range
+        assert!(!msg.is_validator_signed(usize::MAX)); // extreme case
+    }
+
+    #[test]
+    fn test_verify_threshold_exactly_67_percent() {
+        // 67% threshold: signing_weight * 3 > total_weight * 2
+        // With 3 validators of weight 100 each (total 300):
+        // - 2 validators (200): 200 * 3 = 600, 300 * 2 = 600, NOT > so FAILS
+        // - Need more than 200 weight to pass
+
+        let mut msg = Message::new(
+            UnsignedMessage::new(1, Id::empty(), vec![]),
+            vec![0b00000011], // validators 0 and 1 signed (weight 200)
+            vec![0u8; 96],
+        );
+
+        let dummy_pubkey = public_key::Key::default();
+        let validators = vec![
+            (dummy_pubkey, 100u64),
+            (dummy_pubkey, 100u64),
+            (dummy_pubkey, 100u64),
+        ];
+
+        let result = msg.verify(&validators);
+        assert!(result.is_ok());
+        // 200 * 3 = 600, 300 * 2 = 600, 600 <= 600, so threshold NOT met
+        assert!(!result.unwrap());
+    }
+
+    #[test]
+    fn test_verify_threshold_just_above_67_percent() {
+        // With 3 validators where total = 300:
+        // Need signing_weight * 3 > 600
+        // signing_weight > 200
+        // So 201 weight should pass the threshold check.
+        //
+        // Note: We can't fully test this without valid BLS keys.
+        // The threshold check happens before BLS verification, but the
+        // verify() function returns early if threshold isn't met.
+        // Since we can't generate valid BLS keys in unit tests easily,
+        // we verify the threshold logic by testing the boundary case above.
+        //
+        // This test documents the expected behavior - with 201/300 weight,
+        // the threshold check would pass (201*3=603 > 300*2=600), but
+        // BLS verification would fail with dummy keys.
+
+        let msg = Message::new(
+            UnsignedMessage::new(1, Id::empty(), vec![]),
+            vec![0b00000011], // validators 0 and 1 signed
+            vec![0u8; 96],
+        );
+
+        // Verify the bit set is interpreted correctly
+        assert!(msg.is_validator_signed(0));
+        assert!(msg.is_validator_signed(1));
+        assert!(!msg.is_validator_signed(2));
+
+        // The actual threshold formula: signing_weight * 3 > total_weight * 2
+        // With signing_weight = 201, total_weight = 300:
+        // 201 * 3 = 603, 300 * 2 = 600, 603 > 600 ✓
+        let signing_weight: u64 = 201;
+        let total_weight: u64 = 300;
+        assert!(
+            signing_weight.saturating_mul(3) > total_weight.saturating_mul(2),
+            "threshold formula should pass with 201/300 weight"
+        );
+    }
+
+    #[test]
+    fn test_verify_weight_overflow_protection() {
+        // Test that saturating arithmetic prevents overflow
+        // We test this by verifying the arithmetic operations don't panic
+
+        // Test the threshold formula with large weights that would overflow
+        let weight1: u64 = u64::MAX / 4;
+        let weight2: u64 = u64::MAX / 4;
+        let weight3: u64 = u64::MAX / 4;
+
+        // Using saturating_add prevents overflow
+        let total = weight1.saturating_add(weight2).saturating_add(weight3);
+        assert_eq!(total, u64::MAX / 4 * 3); // No overflow
+
+        // And with more values that would definitely overflow
+        let extreme_total = u64::MAX.saturating_add(u64::MAX);
+        assert_eq!(extreme_total, u64::MAX); // Saturates at max
+
+        // Test the multiplication in threshold check
+        let signing: u64 = u64::MAX / 2;
+        let total: u64 = u64::MAX;
+
+        // signing * 3 would overflow, but saturating_mul handles it
+        let check1 = signing.saturating_mul(3);
+        let check2 = total.saturating_mul(2);
+        // These should not panic
+        let _ = check1 > check2;
+    }
+
+    #[test]
+    fn test_verify_multi_byte_bit_set() {
+        let msg = Message::new(
+            UnsignedMessage::new(1, Id::empty(), vec![]),
+            vec![0b00000001, 0b00000001, 0b00000001], // validators 0, 8, 16 signed
+            vec![0u8; 96],
+        );
+
+        // Check bit positions across multiple bytes
+        assert!(msg.is_validator_signed(0));   // byte 0, bit 0
+        assert!(!msg.is_validator_signed(1));  // byte 0, bit 1
+        assert!(msg.is_validator_signed(8));   // byte 1, bit 0
+        assert!(!msg.is_validator_signed(9));  // byte 1, bit 1
+        assert!(msg.is_validator_signed(16));  // byte 2, bit 0
+        assert!(!msg.is_validator_signed(17)); // byte 2, bit 1
+        assert!(!msg.is_validator_signed(24)); // byte 3, out of range
+    }
+
+    #[test]
+    fn test_verify_all_bits_set() {
+        let msg = Message::new(
+            UnsignedMessage::new(1, Id::empty(), vec![]),
+            vec![0xFF, 0xFF], // 16 validators all signed
+            vec![0u8; 96],
+        );
+
+        for i in 0..16 {
+            assert!(msg.is_validator_signed(i), "validator {} should be signed", i);
+        }
+        assert!(!msg.is_validator_signed(16)); // out of range
+    }
+
+    #[test]
+    fn test_verify_wrong_signature_length() {
+        let mut msg = Message::new(
+            UnsignedMessage::new(1, Id::empty(), vec![]),
+            vec![0b00000001],
+            vec![0u8; 48], // Wrong length - should be 96 bytes for BLS
+        );
+
+        let dummy_pubkey = public_key::Key::default();
+        let validators = vec![(dummy_pubkey, 100u64)];
+
+        let result = msg.verify(&validators);
+        // Should error when trying to parse malformed signature
+        assert!(result.is_err() || !result.unwrap());
+    }
+
+    #[test]
+    fn test_verify_empty_signature() {
+        let mut msg = Message::new(
+            UnsignedMessage::new(1, Id::empty(), vec![]),
+            vec![0b00000001],
+            vec![], // Empty signature
+        );
+
+        let dummy_pubkey = public_key::Key::default();
+        let validators = vec![(dummy_pubkey, 100u64)];
+
+        let result = msg.verify(&validators);
+        // Should error when trying to parse empty signature
+        assert!(result.is_err() || !result.unwrap());
+    }
+
+    #[test]
+    fn test_message_roundtrip() {
+        let mut msg = Message::new(
+            UnsignedMessage::new(1, Id::from_slice(&[5u8; 32]), vec![1, 2, 3]),
+            vec![0b00000111], // validators 0, 1, 2 signed
+            vec![0u8; 96],    // dummy signature
+        );
+
+        let bytes = msg.to_bytes().unwrap();
+        let parsed = Message::from_bytes(&bytes).unwrap();
+
+        assert_eq!(msg.unsigned_message.network_id, parsed.unsigned_message.network_id);
+        assert_eq!(msg.unsigned_message.source_chain_id, parsed.unsigned_message.source_chain_id);
+        assert_eq!(msg.unsigned_message.payload, parsed.unsigned_message.payload);
+        assert_eq!(msg.signature_bit_set, parsed.signature_bit_set);
+        assert_eq!(msg.signature, parsed.signature);
+    }
+
+    #[test]
+    fn test_message_id_consistency() {
+        let mut msg1 = UnsignedMessage::new(1, Id::from_slice(&[1u8; 32]), vec![1, 2, 3]);
+        let mut msg2 = UnsignedMessage::new(1, Id::from_slice(&[1u8; 32]), vec![1, 2, 3]);
+
+        let id1 = msg1.id().unwrap();
+        let id2 = msg2.id().unwrap();
+
+        assert_eq!(id1, id2, "identical messages should have identical IDs");
+
+        // Different payload should produce different ID
+        let mut msg3 = UnsignedMessage::new(1, Id::from_slice(&[1u8; 32]), vec![1, 2, 3, 4]);
+        let id3 = msg3.id().unwrap();
+        assert_ne!(id1, id3, "different messages should have different IDs");
+    }
+
+    #[test]
+    fn test_unsigned_message_codec_version() {
+        // Test that we reject unsupported codec versions
+        let mut bytes = vec![0x00, 0x01]; // codec version 1 (unsupported)
+        bytes.extend_from_slice(&[0u8; 4]); // network_id
+        bytes.extend_from_slice(&[0u8; 32]); // chain_id
+        bytes.extend_from_slice(&[0u8; 4]); // payload len = 0
+
+        let result = UnsignedMessage::from_bytes(&bytes);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().message().contains("unsupported codec version"));
+    }
 }

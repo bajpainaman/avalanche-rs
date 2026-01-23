@@ -178,7 +178,7 @@ async fn make_single_export(
 
     let mut accepted = 0_usize;
     for ep in http_rpc_eps.iter() {
-        let resp = avalanche_sdk_x::get_tx_status(ep, &tx_id.to_string())
+        let resp = avalanche_sdk_x::get_tx(ep, &tx_id.to_string())
             .await
             .unwrap();
 
@@ -200,7 +200,7 @@ async fn make_single_export(
 
         accepted = 0_usize;
         for ep in http_rpc_eps.iter() {
-            let resp = avalanche_sdk_x::get_tx_status(ep, &tx_id.to_string())
+            let resp = avalanche_sdk_x::get_tx(ep, &tx_id.to_string())
                 .await
                 .unwrap();
 

@@ -112,6 +112,123 @@ fn test_issue_tx() {
     assert_eq!(resp, expected);
 }
 
+/// ref. <https://docs.avax.network/apis/avalanchego/apis/x-chain/#avmgettx>
+///
+/// Request parameters for avm.getTx.
+#[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone)]
+pub struct GetTxRequest {
+    pub jsonrpc: String,
+    pub id: u32,
+    pub method: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub params: Option<GetTxParams>,
+}
+
+impl Default for GetTxRequest {
+    fn default() -> Self {
+        Self {
+            jsonrpc: String::from(super::DEFAULT_VERSION),
+            id: super::DEFAULT_ID,
+            method: String::from("avm.getTx"),
+            params: None,
+        }
+    }
+}
+
+impl GetTxRequest {
+    pub fn encode_json(&self) -> std::io::Result<String> {
+        serde_json::to_string(&self).map_err(|e| {
+            std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("failed to serialize JSON {}", e),
+            )
+        })
+    }
+}
+
+/// ref. <https://docs.avax.network/apis/avalanchego/apis/x-chain/#avmgettx>
+#[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct GetTxParams {
+    #[serde(rename = "txID")]
+    pub tx_id: String,
+    pub encoding: String,
+}
+
+/// ref. <https://docs.avax.network/apis/avalanchego/apis/x-chain/#avmgettx>
+///
+/// Response for avm.getTx - returns transaction bytes and status.
+/// This replaces the deprecated avm.getTxStatus API.
+#[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone)]
+pub struct GetTxResponse {
+    pub jsonrpc: String,
+    pub id: u32,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result: Option<GetTxResult>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<jsonrpc::ResponseError>,
+}
+
+impl Default for GetTxResponse {
+    fn default() -> Self {
+        Self {
+            jsonrpc: "2.0".to_string(),
+            id: 1,
+            result: None,
+            error: None,
+        }
+    }
+}
+
+/// ref. <https://docs.avax.network/apis/avalanchego/apis/x-chain/#avmgettx>
+#[serde_as]
+#[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone, Default)]
+pub struct GetTxResult {
+    /// The transaction bytes in the requested encoding.
+    pub tx: String,
+
+    /// The encoding of the tx field.
+    pub encoding: String,
+
+    /// The transaction status (Accepted, Processing, Rejected, Unknown).
+    #[serde_as(as = "DisplayFromStr")]
+    pub status: choices::status::Status,
+}
+
+/// RUST_LOG=debug cargo test --package avalanche-types --lib -- jsonrpc::avm::test_get_tx --exact --show-output
+#[test]
+fn test_get_tx() {
+    // ref. https://docs.avax.network/apis/avalanchego/apis/x-chain/#avmgettx
+    let resp: GetTxResponse = serde_json::from_str(
+        r#"
+{
+    "jsonrpc": "2.0",
+    "result": {
+        "tx": "0x00000001ed5f38341e436e5d46e2bb00b45d62ae97d1b050c64bc634ae10626739e35c4b000000016870b7d66ac32540311379e5b5dbad28ec7eb8ddbfc8f4d67299ebb48475907a0000000500000000ee6b2800000000010000000000000000",
+        "encoding": "hex",
+        "status": "Accepted"
+    },
+    "id": 1
+}
+"#,
+    )
+    .unwrap();
+
+    let expected = GetTxResponse {
+        jsonrpc: "2.0".to_string(),
+        id: 1,
+        result: Some(GetTxResult {
+            tx: String::from("0x00000001ed5f38341e436e5d46e2bb00b45d62ae97d1b050c64bc634ae10626739e35c4b000000016870b7d66ac32540311379e5b5dbad28ec7eb8ddbfc8f4d67299ebb48475907a0000000500000000ee6b2800000000010000000000000000"),
+            encoding: String::from("hex"),
+            status: choices::status::Status::Accepted,
+        }),
+        error: None,
+    };
+    assert_eq!(resp, expected);
+}
+
 /// ref. <https://docs.avax.network/apis/avalanchego/apis/x-chain/#avmgettxstatus>
 ///
 /// **DEPRECATED since avalanchego v1.14.0 (Granite)**: Use `avm.getTx` instead.
