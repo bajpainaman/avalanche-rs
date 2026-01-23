@@ -40,12 +40,9 @@ func (s *server) AcceptedFrontier(ctx context.Context, req *rpcpb.AcceptedFronti
 	chainID := [32]byte{}
 	copy(chainID[:], req.ChainId)
 
-	// In v1.14.0, AcceptedFrontier takes a single containerID instead of a slice
-	// Use the first container ID if available, otherwise use empty ID
+	// In v1.14.0, AcceptedFrontier takes a single containerID
 	var containerID ids.ID
-	if len(req.ContainerIds) > 0 {
-		copy(containerID[:], req.ContainerIds[0])
-	}
+	copy(containerID[:], req.ContainerId)
 
 	msg, err := mc.AcceptedFrontier(chainID, req.RequestId, containerID)
 	if err != nil {
@@ -331,17 +328,11 @@ func (s *server) Chits(ctx context.Context, req *rpcpb.ChitsRequest) (*rpcpb.Chi
 	// In v1.14.0, Chits signature changed significantly
 	// Now takes: chainID, requestID, preferredID, preferredIDAtHeight, acceptedID, acceptedHeight
 	var preferredID, preferredIDAtHeight, acceptedID ids.ID
-	if len(req.ContainerIds) > 0 {
-		copy(preferredID[:], req.ContainerIds[0])
-	}
-	if len(req.ContainerIds) > 1 {
-		copy(preferredIDAtHeight[:], req.ContainerIds[1])
-	}
-	if len(req.ContainerIds) > 2 {
-		copy(acceptedID[:], req.ContainerIds[2])
-	}
+	copy(preferredID[:], req.PreferredId)
+	copy(preferredIDAtHeight[:], req.PreferredIdAtHeight)
+	copy(acceptedID[:], req.AcceptedId)
 
-	msg, err := mc.Chits(ids.ID(chainID), req.RequestId, preferredID, preferredIDAtHeight, acceptedID, 0)
+	msg, err := mc.Chits(ids.ID(chainID), req.RequestId, preferredID, preferredIDAtHeight, acceptedID, req.AcceptedHeight)
 	if err != nil {
 		return nil, err
 	}

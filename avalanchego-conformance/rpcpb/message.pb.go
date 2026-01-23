@@ -22,11 +22,12 @@ const (
 )
 
 type AcceptedFrontierRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ChainId       []byte                 `protobuf:"bytes,1,opt,name=chain_id,json=chainId,proto3" json:"chain_id,omitempty"`
-	RequestId     uint32                 `protobuf:"varint,2,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	ContainerIds  [][]byte               `protobuf:"bytes,3,rep,name=container_ids,json=containerIds,proto3" json:"container_ids,omitempty"`
-	SerializedMsg []byte                 `protobuf:"bytes,4,opt,name=serialized_msg,json=serializedMsg,proto3" json:"serialized_msg,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	ChainId   []byte                 `protobuf:"bytes,1,opt,name=chain_id,json=chainId,proto3" json:"chain_id,omitempty"`
+	RequestId uint32                 `protobuf:"varint,2,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	// v1.14.0: single containerID, not repeated
+	ContainerId   []byte `protobuf:"bytes,3,opt,name=container_id,json=containerId,proto3" json:"container_id,omitempty"`
+	SerializedMsg []byte `protobuf:"bytes,4,opt,name=serialized_msg,json=serializedMsg,proto3" json:"serialized_msg,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -75,9 +76,9 @@ func (x *AcceptedFrontierRequest) GetRequestId() uint32 {
 	return 0
 }
 
-func (x *AcceptedFrontierRequest) GetContainerIds() [][]byte {
+func (x *AcceptedFrontierRequest) GetContainerId() []byte {
 	if x != nil {
-		return x.ContainerIds
+		return x.ContainerId
 	}
 	return nil
 }
@@ -958,13 +959,17 @@ func (x *AppResponseResponse) GetSuccess() bool {
 }
 
 type ChitsRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ChainId       []byte                 `protobuf:"bytes,1,opt,name=chain_id,json=chainId,proto3" json:"chain_id,omitempty"`
-	RequestId     uint32                 `protobuf:"varint,2,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	ContainerIds  [][]byte               `protobuf:"bytes,3,rep,name=container_ids,json=containerIds,proto3" json:"container_ids,omitempty"`
-	SerializedMsg []byte                 `protobuf:"bytes,4,opt,name=serialized_msg,json=serializedMsg,proto3" json:"serialized_msg,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	ChainId   []byte                 `protobuf:"bytes,1,opt,name=chain_id,json=chainId,proto3" json:"chain_id,omitempty"`
+	RequestId uint32                 `protobuf:"varint,2,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	// v1.14.0: preferredID, preferredIDAtHeight, acceptedID (not repeated)
+	PreferredId         []byte `protobuf:"bytes,3,opt,name=preferred_id,json=preferredId,proto3" json:"preferred_id,omitempty"`
+	PreferredIdAtHeight []byte `protobuf:"bytes,4,opt,name=preferred_id_at_height,json=preferredIdAtHeight,proto3" json:"preferred_id_at_height,omitempty"`
+	AcceptedId          []byte `protobuf:"bytes,5,opt,name=accepted_id,json=acceptedId,proto3" json:"accepted_id,omitempty"`
+	AcceptedHeight      uint64 `protobuf:"varint,6,opt,name=accepted_height,json=acceptedHeight,proto3" json:"accepted_height,omitempty"`
+	SerializedMsg       []byte `protobuf:"bytes,7,opt,name=serialized_msg,json=serializedMsg,proto3" json:"serialized_msg,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *ChitsRequest) Reset() {
@@ -1011,11 +1016,32 @@ func (x *ChitsRequest) GetRequestId() uint32 {
 	return 0
 }
 
-func (x *ChitsRequest) GetContainerIds() [][]byte {
+func (x *ChitsRequest) GetPreferredId() []byte {
 	if x != nil {
-		return x.ContainerIds
+		return x.PreferredId
 	}
 	return nil
+}
+
+func (x *ChitsRequest) GetPreferredIdAtHeight() []byte {
+	if x != nil {
+		return x.PreferredIdAtHeight
+	}
+	return nil
+}
+
+func (x *ChitsRequest) GetAcceptedId() []byte {
+	if x != nil {
+		return x.AcceptedId
+	}
+	return nil
+}
+
+func (x *ChitsRequest) GetAcceptedHeight() uint64 {
+	if x != nil {
+		return x.AcceptedHeight
+	}
+	return 0
 }
 
 func (x *ChitsRequest) GetSerializedMsg() []byte {
@@ -2194,9 +2220,9 @@ func (x *PingResponse) GetSuccess() bool {
 }
 
 type PongRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	UptimePct     uint32                 `protobuf:"varint,1,opt,name=uptime_pct,json=uptimePct,proto3" json:"uptime_pct,omitempty"`
-	SerializedMsg []byte                 `protobuf:"bytes,2,opt,name=serialized_msg,json=serializedMsg,proto3" json:"serialized_msg,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// v1.14.0: Pong has no fields (uptime removed)
+	SerializedMsg []byte `protobuf:"bytes,1,opt,name=serialized_msg,json=serializedMsg,proto3" json:"serialized_msg,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2229,13 +2255,6 @@ func (x *PongRequest) ProtoReflect() protoreflect.Message {
 // Deprecated: Use PongRequest.ProtoReflect.Descriptor instead.
 func (*PongRequest) Descriptor() ([]byte, []int) {
 	return file_rpcpb_message_proto_rawDescGZIP(), []int{33}
-}
-
-func (x *PongRequest) GetUptimePct() uint32 {
-	if x != nil {
-		return x.UptimePct
-	}
-	return 0
 }
 
 func (x *PongRequest) GetSerializedMsg() []byte {
@@ -3029,12 +3048,12 @@ var File_rpcpb_message_proto protoreflect.FileDescriptor
 
 const file_rpcpb_message_proto_rawDesc = "" +
 	"\n" +
-	"\x13rpcpb/message.proto\x12\x05rpcpb\"\x9f\x01\n" +
+	"\x13rpcpb/message.proto\x12\x05rpcpb\"\x9d\x01\n" +
 	"\x17AcceptedFrontierRequest\x12\x19\n" +
 	"\bchain_id\x18\x01 \x01(\fR\achainId\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\x02 \x01(\rR\trequestId\x12#\n" +
-	"\rcontainer_ids\x18\x03 \x03(\fR\fcontainerIds\x12%\n" +
+	"request_id\x18\x02 \x01(\rR\trequestId\x12!\n" +
+	"\fcontainer_id\x18\x03 \x01(\fR\vcontainerId\x12%\n" +
 	"\x0eserialized_msg\x18\x04 \x01(\fR\rserializedMsg\"\x86\x01\n" +
 	"\x18AcceptedFrontierResponse\x126\n" +
 	"\x17expected_serialized_msg\x18\x01 \x01(\fR\x15expectedSerializedMsg\x12\x18\n" +
@@ -3106,13 +3125,17 @@ const file_rpcpb_message_proto_rawDesc = "" +
 	"\x13AppResponseResponse\x126\n" +
 	"\x17expected_serialized_msg\x18\x01 \x01(\fR\x15expectedSerializedMsg\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x18\n" +
-	"\asuccess\x18\x03 \x01(\bR\asuccess\"\x94\x01\n" +
+	"\asuccess\x18\x03 \x01(\bR\asuccess\"\x91\x02\n" +
 	"\fChitsRequest\x12\x19\n" +
 	"\bchain_id\x18\x01 \x01(\fR\achainId\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\x02 \x01(\rR\trequestId\x12#\n" +
-	"\rcontainer_ids\x18\x03 \x03(\fR\fcontainerIds\x12%\n" +
-	"\x0eserialized_msg\x18\x04 \x01(\fR\rserializedMsg\"{\n" +
+	"request_id\x18\x02 \x01(\rR\trequestId\x12!\n" +
+	"\fpreferred_id\x18\x03 \x01(\fR\vpreferredId\x123\n" +
+	"\x16preferred_id_at_height\x18\x04 \x01(\fR\x13preferredIdAtHeight\x12\x1f\n" +
+	"\vaccepted_id\x18\x05 \x01(\fR\n" +
+	"acceptedId\x12'\n" +
+	"\x0faccepted_height\x18\x06 \x01(\x04R\x0eacceptedHeight\x12%\n" +
+	"\x0eserialized_msg\x18\a \x01(\fR\rserializedMsg\"{\n" +
 	"\rChitsResponse\x126\n" +
 	"\x17expected_serialized_msg\x18\x01 \x01(\fR\x15expectedSerializedMsg\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x18\n" +
@@ -3202,11 +3225,9 @@ const file_rpcpb_message_proto_rawDesc = "" +
 	"\fPingResponse\x126\n" +
 	"\x17expected_serialized_msg\x18\x01 \x01(\fR\x15expectedSerializedMsg\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x18\n" +
-	"\asuccess\x18\x03 \x01(\bR\asuccess\"S\n" +
-	"\vPongRequest\x12\x1d\n" +
-	"\n" +
-	"uptime_pct\x18\x01 \x01(\rR\tuptimePct\x12%\n" +
-	"\x0eserialized_msg\x18\x02 \x01(\fR\rserializedMsg\"z\n" +
+	"\asuccess\x18\x03 \x01(\bR\asuccess\"4\n" +
+	"\vPongRequest\x12%\n" +
+	"\x0eserialized_msg\x18\x01 \x01(\fR\rserializedMsg\"z\n" +
 	"\fPongResponse\x126\n" +
 	"\x17expected_serialized_msg\x18\x01 \x01(\fR\x15expectedSerializedMsg\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x18\n" +

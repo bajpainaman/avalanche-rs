@@ -1,6 +1,6 @@
 use std::net::IpAddr;
 
-use avalanche_types::message::peerlist::{self, ClaimedIpPort};
+use avalanche_types::{ids, message::peerlist::{self, ClaimedIpPort}};
 use avalanchego_conformance_sdk::{Client, Peer as RpcPeer, PeerlistRequest};
 
 #[tokio::test]
@@ -14,6 +14,7 @@ async fn peerlist() {
     assert!(is_set);
     let cli = Client::new(&ep).await;
 
+    // v1.14.0: ClaimedIpPort now includes tx_id field
     let claimed_ip_ports = vec![
         ClaimedIpPort {
             certificate: random_manager::secure_bytes(50).unwrap(),
@@ -21,6 +22,7 @@ async fn peerlist() {
             ip_port: 8080,
             time: 7,
             sig: random_manager::secure_bytes(20).unwrap(),
+            tx_id: ids::Id::empty(),
         },
         ClaimedIpPort {
             certificate: random_manager::secure_bytes(50).unwrap(),
@@ -28,6 +30,7 @@ async fn peerlist() {
             ip_port: 8081,
             time: 7,
             sig: random_manager::secure_bytes(20).unwrap(),
+            tx_id: ids::Id::empty(),
         },
     ];
     let msg = peerlist::Message::default().claimed_ip_ports(claimed_ip_ports.clone());
@@ -78,6 +81,7 @@ async fn peerlist_gzip_compress() {
     assert!(is_set);
     let cli = Client::new(&ep).await;
 
+    // v1.14.0: ClaimedIpPort now includes tx_id field
     let claimed_ip_ports = vec![
         ClaimedIpPort {
             certificate: random_manager::secure_bytes(50).unwrap(),
@@ -85,6 +89,7 @@ async fn peerlist_gzip_compress() {
             ip_port: 8080,
             time: 7,
             sig: random_manager::secure_bytes(20).unwrap(),
+            tx_id: ids::Id::empty(),
         },
         ClaimedIpPort {
             certificate: random_manager::secure_bytes(50).unwrap(),
@@ -92,6 +97,7 @@ async fn peerlist_gzip_compress() {
             ip_port: 8081,
             time: 7,
             sig: random_manager::secure_bytes(20).unwrap(),
+            tx_id: ids::Id::empty(),
         },
     ];
     let msg = peerlist::Message::default()

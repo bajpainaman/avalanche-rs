@@ -77,7 +77,8 @@ service MessageService {
 message AcceptedFrontierRequest {
   bytes chain_id = 1;
   uint32 request_id = 2;
-  repeated bytes container_ids = 3;
+  // v1.14.0: single containerID, not repeated
+  bytes container_id = 3;
 
   bytes serialized_msg = 4;
 }
@@ -194,9 +195,13 @@ message AppResponseResponse {
 message ChitsRequest {
   bytes chain_id               = 1;
   uint32 request_id            = 2;
-  repeated bytes container_ids = 3;
+  // v1.14.0: preferredID, preferredIDAtHeight, acceptedID (not repeated)
+  bytes preferred_id           = 3;
+  bytes preferred_id_at_height = 4;
+  bytes accepted_id            = 5;
+  uint64 accepted_height       = 6;
 
-  bytes serialized_msg = 4;
+  bytes serialized_msg = 7;
 }
 
 message ChitsResponse {
@@ -344,9 +349,8 @@ message PingResponse {
 /////////////////////////////////////////////////////
 
 message PongRequest {
-  uint32 uptime_pct = 1;
-
-  bytes serialized_msg = 2;
+  // v1.14.0: Pong has no fields (uptime removed)
+  bytes serialized_msg = 1;
 }
 
 message PongResponse {

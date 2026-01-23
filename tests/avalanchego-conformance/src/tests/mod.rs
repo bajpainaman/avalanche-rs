@@ -1,8 +1,6 @@
 pub mod key;
+pub mod message;
 pub mod packer;
-
-// TODO: add it back... failing
-// pub mod message;
 
 use avalanchego_conformance_sdk::Client;
 
