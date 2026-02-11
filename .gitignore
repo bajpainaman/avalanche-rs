@@ -18,3 +18,6 @@ Cargo.lock
 .DS_Store
 .vscode
 .idea
+avalanchego-conformance/avalanchego-conformance
+firebase-debug.log
+avalanchego-conformance/firebase-debug.log

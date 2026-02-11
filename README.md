@@ -7,7 +7,19 @@
 > use. Do not use avalanche-rs to run production workloads. See the
 > [license](./LICENSE) for more information regarding usage.
 
-avalanche-rs is a collection of crates that provides all the necessary abstractions to develop Rust-based applications and VMs in the Avalanche ecosystem. It provides the canonical type definitions of all of the various Avalanche APIs, on par with those in [avalanchego](https://github.com/ava-labs/avalanchego), but for Rust developers. 
+avalanche-rs is a collection of crates that provides all the necessary abstractions to develop Rust-based applications and VMs in the Avalanche ecosystem. It provides the canonical type definitions of all of the various Avalanche APIs, on par with those in [avalanchego](https://github.com/ava-labs/avalanchego), but for Rust developers.
+
+## Granite Upgrade Support (ACP-77)
+
+This SDK includes support for the [Granite upgrade](https://github.com/avalanche-foundation/ACPs/tree/main/ACPs/77-reinventing-subnets), which introduces L1 validator management for Avalanche. Key features:
+
+- **L1 Transaction Types**: `ConvertSubnetToL1Tx`, `RegisterL1ValidatorTx`, `SetL1ValidatorWeightTx`, `IncreaseL1ValidatorBalanceTx`, `DisableL1ValidatorTx`
+- **Warp Message Support**: Full serialization for cross-chain messaging payloads
+- **Conformance Testing**: Byte-level compatibility with avalanchego v1.14.0
+
+See [docs/GRANITE_UPGRADE.md](./docs/GRANITE_UPGRADE.md) for implementation details.
+
+## Crates
 
 avalanche-rs is composed of several crates:
 * [core](./core/) - Core networking components for a p2p Avalanche node.
